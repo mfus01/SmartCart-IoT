@@ -1,0 +1,1237 @@
+// =====================================================
+// SMART SHOPPING CART - MAP
+// Ban do 8 khu, 24 ke, tuyen duong, xe day, dau gio hang
+// He toa do logic: 0..100
+// =====================================================
+
+const canvas = document.getElementById("mapCanvas");
+
+if (!canvas) {
+    throw new Error("Khong tim thay #mapCanvas");
+}
+
+const ctx = canvas.getContext("2d");
+
+if (!ctx) {
+    throw new Error("Khong ho tro Canvas 2D");
+}
+
+const W = 100;
+const H = 100;
+
+const px = x => Number(x) / W * canvas.width;
+const py = y => Number(y) / H * canvas.height;
+const pw = w => Number(w) / W * canvas.width;
+const ph = h => Number(h) / H * canvas.height;
+
+
+// =====================================================
+// 1. DANH SACH 8 KHU VUC
+// =====================================================
+
+const zones = [
+    {
+        id: "A",
+        name: "RAU CU QUA",
+        fullName: "RAU CU VA TRAI CAY",
+        color: "#A5D6A7"
+    },
+    {
+        id: "B",
+        name: "THIT TUOI SONG",
+        fullName: "THIT TUOI SONG",
+        color: "#EF9A9A"
+    },
+    {
+        id: "C",
+        name: "CA & HAI SAN",
+        fullName: "CA VA HAI SAN",
+        color: "#80DEEA"
+    },
+    {
+        id: "D",
+        name: "DONG LANH",
+        fullName: "THUC PHAM DONG LANH",
+        color: "#B39DDB"
+    },
+    {
+        id: "E",
+        name: "GAO, MI",
+        fullName: "GAO, MI VA NGU COC",
+        color: "#90CAF9"
+    },
+    {
+        id: "F",
+        name: "GIA VI",
+        fullName: "GIA VI VA DO KHO",
+        color: "#FFE082"
+    },
+    {
+        id: "G",
+        name: "DO HOP",
+        fullName: "DO HOP VA BANH KEO",
+        color: "#CE93D8"
+    },
+    {
+        id: "H",
+        name: "SUA, DO UONG",
+        fullName: "SUA VA DO UONG",
+        color: "#80CBC4"
+    }
+];
+
+
+// =====================================================
+// 2. TAO 24 KE HANG
+// =====================================================
+
+const columns = [
+    4, 16, 28, 40, 52, 64, 76, 88
+];
+
+const rows = [
+    18, 37, 56
+];
+
+const shelves = [];
+
+zones.forEach((zone, i) => {
+
+    rows.forEach((y, j) => {
+
+        shelves.push({
+
+            id: zone.id + (j + 1),
+
+            label: zone.id + (j + 1),
+
+            zoneId: zone.id,
+
+            zone: zone.fullName,
+
+            x: columns[i],
+
+            y: y,
+
+            width: 7,
+
+            height: 10,
+
+            accessX: columns[i] + 3.5,
+
+            accessY: y + 12,
+
+            color: zone.color
+
+        });
+
+    });
+
+});
+
+
+// =====================================================
+// 3. CUA VAO VA QUAY THANH TOAN
+// =====================================================
+
+const ENTRANCE = {
+    x: 8,
+    y: 91,
+    label: "CUA VAO"
+};
+
+const CHECKOUTS = [
+    {
+        id: "Q1",
+        x: 76,
+        y: 91,
+        label: "QUAY 1"
+    },
+    {
+        id: "Q2",
+        x: 86,
+        y: 91,
+        label: "QUAY 2"
+    },
+    {
+        id: "Q3",
+        x: 96,
+        y: 91,
+        label: "QUAY 3"
+    }
+];
+
+
+// =====================================================
+// 4. TRANG THAI BAN DO
+// =====================================================
+
+let highlightedProduct = null;
+
+let currentRoute = null;
+
+let cartPosition = {
+    x: ENTRANCE.x,
+    y: ENTRANCE.y
+};
+
+// Luu tat ca san pham trong gio hang
+let cartProductsOnMap = [];
+
+
+// =====================================================
+// 5. KIEM TRA TOA DO
+// =====================================================
+
+function valid(point) {
+
+    return point != null &&
+
+        point.x != null &&
+
+        point.y != null &&
+
+        Number.isFinite(Number(point.x)) &&
+
+        Number.isFinite(Number(point.y)) &&
+
+        Number(point.x) >= 0 &&
+
+        Number(point.x) <= 100 &&
+
+        Number(point.y) >= 0 &&
+
+        Number(point.y) <= 100;
+}
+
+
+// =====================================================
+// 6. VE HINH CHU NHAT
+// =====================================================
+
+function rect(x, y, w, h, color) {
+
+    ctx.fillStyle = color;
+
+    ctx.fillRect(
+        px(x),
+        py(y),
+        pw(w),
+        ph(h)
+    );
+}
+
+
+// =====================================================
+// 7. VE MARKER
+// =====================================================
+
+function marker(x, y, color, label, radius = 8) {
+
+    ctx.beginPath();
+
+    ctx.arc(
+        px(x),
+        py(y),
+        radius,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 11px Arial";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(
+        String(label),
+        px(x),
+        py(y)
+    );
+}
+
+
+// =====================================================
+// 8. VE NEN BAN DO
+// =====================================================
+
+function drawBackground() {
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    rect(
+        0,
+        0,
+        100,
+        100,
+        "#f5f8f6"
+    );
+
+    ctx.strokeStyle = "#e3eae5";
+    ctx.lineWidth = 1;
+
+    for (let i = 0; i <= 100; i += 5) {
+
+        ctx.beginPath();
+        ctx.moveTo(px(i), 0);
+        ctx.lineTo(px(i), canvas.height);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, py(i));
+        ctx.lineTo(canvas.width, py(i));
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = "#8a9b91";
+    ctx.lineWidth = 3;
+
+    ctx.strokeRect(
+        2,
+        2,
+        canvas.width - 4,
+        canvas.height - 4
+    );
+}
+
+
+// =====================================================
+// 9. VE LOI DI
+// =====================================================
+
+function drawAisles() {
+
+    [
+        { y: 11, h: 3 },
+        { y: 30, h: 4 },
+        { y: 49, h: 4 },
+        { y: 68, h: 4 },
+        { y: 79, h: 3 }
+
+    ].forEach(a =>
+
+        rect(
+            2,
+            a.y,
+            96,
+            a.h,
+            "#ffffff"
+        )
+
+    );
+
+    [
+        12, 24, 36, 48, 60, 72, 84
+
+    ].forEach(x =>
+
+        rect(
+            x,
+            14,
+            3,
+            64,
+            "#ffffff"
+        )
+
+    );
+
+    // Loi di chinh
+    rect(
+        2,
+        82,
+        96,
+        7,
+        "#eaf2ed"
+    );
+
+    ctx.strokeStyle = "#d5e0d9";
+    ctx.lineWidth = 1.5;
+
+    ctx.strokeRect(
+        px(2),
+        py(14),
+        pw(96),
+        ph(64)
+    );
+}
+
+
+// =====================================================
+// 10. VE TEN KHU VUC
+// =====================================================
+
+function drawZoneLabels() {
+
+    zones.forEach((z, i) => {
+
+        const centerX = columns[i] + 3.5;
+
+        rect(
+            columns[i] - 1,
+            2.5,
+            9,
+            6.5,
+            z.color
+        );
+
+        ctx.fillStyle = "#263238";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.font = "bold 18px Arial";
+
+        ctx.fillText(
+            z.id,
+            px(centerX),
+            py(6) - 7
+        );
+
+        ctx.font = "bold 15px Arial";
+
+        ctx.fillText(
+            z.name,
+            px(centerX),
+            py(6) + 9
+        );
+    });
+}
+
+
+// =====================================================
+// 11. VE KE HANG
+// =====================================================
+
+function drawShelf(s) {
+
+    // Bong ke
+    ctx.fillStyle = "rgba(38,50,56,.15)";
+
+    ctx.fillRect(
+        px(s.x) + 3,
+        py(s.y) + 3,
+        pw(s.width),
+        ph(s.height)
+    );
+
+    // Than ke
+    rect(
+        s.x,
+        s.y,
+        s.width,
+        s.height,
+        s.color
+    );
+
+    // Vien ke
+    ctx.strokeStyle = "#455a64";
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+        px(s.x),
+        py(s.y),
+        pw(s.width),
+        ph(s.height)
+    );
+
+    // Vach ngan
+    ctx.strokeStyle = "rgba(38,50,56,.2)";
+    ctx.lineWidth = 1;
+
+    for (let i = 1; i < 4; i++) {
+
+        const x =
+            px(s.x) + pw(s.width) * i / 4;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            x,
+            py(s.y) + 3
+        );
+
+        ctx.lineTo(
+            x,
+            py(s.y + s.height) - 3
+        );
+
+        ctx.stroke();
+    }
+
+    // Ten ke
+    ctx.fillStyle = "#263238";
+    ctx.font = "bold 18px Arial";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(
+        s.label,
+        px(s.x + s.width / 2),
+        py(s.y + s.height / 2)
+    );
+}
+
+
+// =====================================================
+// 12. VE DIEM TIEP CAN KE
+// =====================================================
+
+function drawAccessPoint(s) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        px(s.accessX),
+        py(s.y + s.height)
+    );
+
+    ctx.lineTo(
+        px(s.accessX),
+        py(s.accessY)
+    );
+
+    ctx.strokeStyle = "#9eaaa3";
+    ctx.lineWidth = 1.5;
+
+    ctx.stroke();
+
+    ctx.beginPath();
+
+    ctx.arc(
+        px(s.accessX),
+        py(s.accessY),
+        5,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fillStyle = "#d32f2f";
+    ctx.fill();
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+}
+
+
+// =====================================================
+// 13. VE CUA VAO
+// =====================================================
+
+function drawEntrance() {
+
+    rect(
+        ENTRANCE.x - 4,
+        ENTRANCE.y - 3,
+        8,
+        5,
+        "#c8e6c9"
+    );
+
+    ctx.strokeStyle = "#2e7d32";
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+        px(ENTRANCE.x - 4),
+        py(ENTRANCE.y - 3),
+        pw(8),
+        ph(5)
+    );
+
+    ctx.fillStyle = "#1b5e20";
+    ctx.font = "bold 13px Arial";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(
+        "CUA VAO",
+        px(ENTRANCE.x),
+        py(ENTRANCE.y) - ph(.5)
+    );
+
+    marker(
+        ENTRANCE.x,
+        ENTRANCE.y,
+        "#2e7d32",
+        "S"
+    );
+}
+
+
+// =====================================================
+// 14. VE QUAY THANH TOAN
+// =====================================================
+
+function drawCheckouts() {
+
+    CHECKOUTS.forEach(q => {
+
+        rect(
+            q.x - 4,
+            q.y - 3,
+            8,
+            5,
+            "#ffe0b2"
+        );
+
+        ctx.strokeStyle = "#ef6c00";
+        ctx.lineWidth = 2;
+
+        ctx.strokeRect(
+            px(q.x - 4),
+            py(q.y - 3),
+            pw(8),
+            ph(5)
+        );
+
+        ctx.fillStyle = "#e65100";
+        ctx.font = "bold 12px Arial";
+
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.fillText(
+            q.label,
+            px(q.x),
+            py(q.y) - ph(.5)
+        );
+    });
+}
+
+
+// =====================================================
+// 15. TIM KE HANG
+// =====================================================
+
+function findShelf(id) {
+
+    if (id == null) {
+        return null;
+    }
+
+    let key = String(id)
+        .trim()
+        .toUpperCase();
+
+    if (/^[A-H]$/.test(key)) {
+        key += "1";
+    }
+
+    return shelves.find(
+        s => s.id === key
+    ) || null;
+}
+
+
+// =====================================================
+// 16. DANH DAU SAN PHAM DANG XEM
+// =====================================================
+
+function drawProductHighlight(product) {
+
+    const shelf = findShelf(product.shelfId);
+
+    const point = shelf
+        ? {
+            x: shelf.accessX,
+            y: shelf.accessY
+        }
+        : {
+            x: product.xCoord,
+            y: product.yCoord
+        };
+
+    if (!valid(point)) {
+        return;
+    }
+
+    // Vong tron highlight
+    ctx.beginPath();
+
+    ctx.arc(
+        px(point.x),
+        py(point.y),
+        13,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.strokeStyle = "#ff9800";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Highlight ke
+    if (shelf) {
+
+        ctx.strokeRect(
+            px(shelf.x) - 3,
+            py(shelf.y) - 3,
+            pw(shelf.width) + 6,
+            ph(shelf.height) + 6
+        );
+    }
+
+    // Ten san pham
+    const label = String(
+        product.name ?? "San pham"
+    );
+
+    ctx.font = "bold 14px Arial";
+
+    const width = Math.min(
+        canvas.width - 10,
+        ctx.measureText(label).width + 16
+    );
+
+    const x = Math.max(
+        5,
+        Math.min(
+            px(point.x) + 12,
+            canvas.width - width - 5
+        )
+    );
+
+    const y = Math.max(
+        5,
+        py(point.y) - 35
+    );
+
+    // Nen nhan
+    ctx.fillStyle = "#fff8e1";
+    ctx.fillRect(x, y, width, 25);
+
+    ctx.strokeStyle = "#ff9800";
+    ctx.lineWidth = 1;
+
+    ctx.strokeRect(x, y, width, 25);
+
+    ctx.fillStyle = "#bf360c";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(
+        label,
+        x + 8,
+        y + 12,
+        width - 12
+    );
+}
+
+
+// =====================================================
+// 17. VE TUYEN DUONG
+// =====================================================
+
+function drawRouteOverlay(points) {
+
+    if (
+        !Array.isArray(points) ||
+        points.length < 2
+    ) {
+        return;
+    }
+
+    ctx.beginPath();
+
+    points.forEach((p, i) => {
+
+        if (i === 0) {
+
+            ctx.moveTo(
+                px(p.x),
+                py(p.y)
+            );
+
+        } else {
+
+            ctx.lineTo(
+                px(p.x),
+                py(p.y)
+            );
+        }
+    });
+
+    ctx.strokeStyle = "#7b1fa2";
+    ctx.lineWidth = 5;
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.setLineDash([12, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Diem bat dau
+    marker(
+        points[0].x,
+        points[0].y,
+        "#2e7d32",
+        "S"
+    );
+
+    // Diem ket thuc
+    const last = points[points.length - 1];
+
+    marker(
+        last.x,
+        last.y,
+        "#c62828",
+        "F"
+    );
+}
+
+
+// =====================================================
+// 18. NHOM SAN PHAM TRONG GIO THEO KE
+// =====================================================
+
+function getCartShelfGroups() {
+
+    const groups = [];
+
+    const byShelf = new Map();
+
+    cartProductsOnMap.forEach(product => {
+
+        if (!product || !product.name) {
+            return;
+        }
+
+        const shelf = findShelf(
+            product.shelfId
+        );
+
+        const point = shelf
+            ? {
+                x: shelf.accessX,
+                y: shelf.accessY
+            }
+            : {
+                x: product.xCoord,
+                y: product.yCoord
+            };
+
+        if (!valid(point)) {
+            return;
+        }
+
+        // Moi ke chi co mot nhom
+        const key = shelf
+            ? shelf.id
+            : `${point.x}:${point.y}`;
+
+        if (!byShelf.has(key)) {
+
+            const group = {
+
+                index: groups.length + 1,
+
+                shelf: shelf,
+
+                x: Number(point.x),
+
+                y: Number(point.y),
+
+                products: []
+
+            };
+
+            groups.push(group);
+
+            byShelf.set(key, group);
+        }
+
+        byShelf.get(key)
+            .products.push(product);
+    });
+
+    return groups;
+}
+
+
+// =====================================================
+// 19. DANH DAU TAT CA KE TRONG GIO
+// =====================================================
+
+function drawCartMarkers() {
+
+    const groups = getCartShelfGroups();
+
+    groups.forEach(group => {
+
+        ctx.save();
+
+        // Vien cam quanh ke
+        if (group.shelf) {
+
+            const s = group.shelf;
+
+            ctx.strokeStyle = "#ff9800";
+            ctx.lineWidth = 4;
+
+            ctx.strokeRect(
+                px(s.x) - 3,
+                py(s.y) - 3,
+                pw(s.width) + 6,
+                ph(s.height) + 6
+            );
+        }
+
+        // Huy hieu danh so
+        marker(
+            group.x,
+            group.y,
+            "#ef6c00",
+            group.index,
+            11
+        );
+
+        ctx.restore();
+    });
+}
+
+
+// =====================================================
+// 20. BANG DANH SACH KE CAN GHE
+// =====================================================
+
+function updateCartMapLegend() {
+
+    let legend = document.getElementById(
+        "cartMapLegend"
+    );
+
+    // Tao bang neu chua ton tai
+    if (!legend) {
+
+        legend = document.createElement("div");
+
+        legend.id = "cartMapLegend";
+
+        legend.style.cssText = `
+            margin-top: 10px;
+            padding: 12px;
+            background: #fff8e1;
+            border: 1px solid #ffcc80;
+            border-radius: 8px;
+            max-height: 160px;
+            overflow-y: auto;
+            font: 13px Arial, sans-serif;
+        `;
+
+        canvas.insertAdjacentElement(
+            "afterend",
+            legend
+        );
+    }
+
+    legend.replaceChildren();
+
+    const groups = getCartShelfGroups();
+
+    legend.style.display =
+        groups.length ? "block" : "none";
+
+    if (!groups.length) {
+        return;
+    }
+
+    // Tieu de
+    const title = document.createElement("strong");
+
+    title.textContent =
+        `🛒 Các kệ cần ghé (${groups.length})`;
+
+    legend.appendChild(title);
+
+    // Danh sach
+    groups.forEach(group => {
+
+        const row = document.createElement("div");
+
+        row.style.cssText = `
+            margin-top: 8px;
+            line-height: 1.5;
+        `;
+
+        const shelfName = group.shelf
+            ? `Kệ ${group.shelf.id}`
+            : `Vị trí (${group.x}, ${group.y})`;
+
+        const names = group.products.map(p => {
+
+            const quantity =
+                Number(p.quantity) || 1;
+
+            return `${p.name} (x${quantity})`;
+
+        }).join(", ");
+
+        row.textContent =
+            `${group.index}. ${shelfName}: ${names}`;
+
+        legend.appendChild(row);
+    });
+}
+
+
+// =====================================================
+// 21. VE TOAN BO BAN DO
+// =====================================================
+
+export function drawSupermarketMap() {
+
+    drawBackground();
+
+    drawAisles();
+
+    drawZoneLabels();
+
+    // Ve 24 ke
+    shelves.forEach(drawShelf);
+
+    // Ve diem tiep can
+    shelves.forEach(drawAccessPoint);
+
+    drawEntrance();
+
+    drawCheckouts();
+
+    // Ve tuyen duong
+    if (currentRoute) {
+
+        drawRouteOverlay(currentRoute);
+    }
+
+    // Highlight san pham dang xem
+    if (highlightedProduct) {
+
+        drawProductHighlight(highlightedProduct);
+    }
+
+    // Danh dau TAT CA san pham trong gio
+    drawCartMarkers();
+
+    // Ve xe day sau cung
+    if (valid(cartPosition)) {
+
+        marker(
+            cartPosition.x,
+            cartPosition.y,
+            "#1565c0",
+            "X"
+        );
+    }
+}
+
+
+// =====================================================
+// 22. VE LO TRINH TU BACKEND
+// =====================================================
+
+export function drawRoute(points) {
+
+    const good = Array.isArray(points)
+        ? points
+            .filter(valid)
+            .map(p => ({
+
+                x: Number(p.x),
+
+                y: Number(p.y)
+
+            }))
+        : [];
+
+    currentRoute =
+        good.length >= 2 ? good : null;
+
+    if (!currentRoute) {
+
+        console.warn(
+            "Route khong hop le:",
+            points
+        );
+    }
+
+    drawSupermarketMap();
+}
+
+
+// =====================================================
+// 23. XOA LO TRINH
+// =====================================================
+
+export function clearRoute() {
+
+    currentRoute = null;
+
+    drawSupermarketMap();
+}
+
+
+// =====================================================
+// 24. HIGHLIGHT SAN PHAM
+// =====================================================
+
+export function highlightProductOnMap(product) {
+
+    highlightedProduct = product
+        ? { ...product }
+        : null;
+
+    drawSupermarketMap();
+}
+
+
+// =====================================================
+// 25. XOA HIGHLIGHT
+// =====================================================
+
+export function clearProductHighlight() {
+
+    highlightedProduct = null;
+
+    drawSupermarketMap();
+}
+
+
+// =====================================================
+// 26. LAY DANH SACH KE
+// =====================================================
+
+export function getMapShelves() {
+
+    return shelves.map(s => ({
+        ...s
+    }));
+}
+
+
+// =====================================================
+// 27. LAY DIEM TIEP CAN KE
+// =====================================================
+
+export function getShelfAccessPoint(id) {
+
+    const s = findShelf(id);
+
+    return s
+        ? {
+            x: s.accessX,
+            y: s.accessY
+        }
+        : null;
+}
+
+
+// =====================================================
+// 28. LAY CAC KHU VUC
+// =====================================================
+
+export function getMapZones() {
+
+    return zones.map(z => ({
+        ...z
+    }));
+}
+
+
+// =====================================================
+// 29. LAY CUA VAO
+// =====================================================
+
+export function getEntrancePoint() {
+
+    return {
+        x: ENTRANCE.x,
+        y: ENTRANCE.y
+    };
+}
+
+
+// =====================================================
+// 30. LAY QUAY THANH TOAN
+// =====================================================
+
+export function getCheckoutPoints() {
+
+    return CHECKOUTS.map(q => ({
+        ...q
+    }));
+}
+
+
+// =====================================================
+// 31. LAY VI TRI XE DAY
+// =====================================================
+
+export function getCartPosition() {
+
+    return {
+        ...cartPosition
+    };
+}
+
+
+// =====================================================
+// 32. CAP NHAT VI TRI XE DAY
+// =====================================================
+
+export function setCartPosition(point) {
+
+    if (!valid(point)) {
+        return false;
+    }
+
+    cartPosition = {
+
+        x: Number(point.x),
+
+        y: Number(point.y)
+
+    };
+
+    drawSupermarketMap();
+
+    return true;
+}
+
+
+// =====================================================
+// 33. DONG BO GIO HANG VOI BAN DO
+// =====================================================
+
+export function setCartProductsOnMap(products) {
+
+    cartProductsOnMap = Array.isArray(products)
+        ? products.map(p => ({
+            ...p
+        }))
+        : [];
+
+    // Cap nhat danh sach ke
+    updateCartMapLegend();
+
+    // Ve lai ban do
+    drawSupermarketMap();
+}
+
+
+// =====================================================
+// END MAP MODULE
+// =====================================================

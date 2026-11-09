@@ -1,0 +1,301 @@
+package com.smartcart.controller;
+
+import java.util.List;
+
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.smartcart.dto.ApiResponse;
+import com.smartcart.dto.ProductUpdateRequest;
+import com.smartcart.model.Product;
+import com.smartcart.service.ProductService;
+
+import jakarta.validation.Valid;
+
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    // =========================================================
+    // GET - Lay tat ca san pham
+    // =========================================================
+
+    @GetMapping
+    public ApiResponse<List<Product>> getAllProducts() {
+
+        List<Product> products =
+                productService.getAllProducts();
+
+        return new ApiResponse<>(
+                true,
+                "Lay danh sach san pham thanh cong",
+                products
+        );
+    }
+
+    // =========================================================
+    // GET - Tim san pham theo ten
+    // Vi du:
+    // /api/products/search?q=ca chua
+    // =========================================================
+
+    @GetMapping("/search")
+    public ApiResponse<List<Product>> searchProducts(
+            @RequestParam("q") String keyword) {
+
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return new ApiResponse<>(
+                    false,
+                    "Tu khoa tim kiem khong duoc de trong",
+                    List.of()
+            );
+        }
+
+        List<Product> products =
+                productService.searchProducts(keyword);
+
+        if (products.isEmpty()) {
+            return new ApiResponse<>(
+                    false,
+                    "Khong tim thay san pham",
+                    products
+            );
+        }
+
+        return new ApiResponse<>(
+                true,
+                "Tim thay san pham",
+                products
+        );
+    }
+
+    // =========================================================
+    // GET - Tim san pham theo ID
+    // Vi du:
+    // /api/products/P001
+    // =========================================================
+
+    @GetMapping("/{id}")
+    public ApiResponse<Product> getProductById(
+            @PathVariable("id") String id) {
+
+    	if (!isValidProductId(id)) {
+            return new ApiResponse<>(
+                    false,
+                    "ID san pham khong dung dinh dang",
+                    null
+            );
+        }
+
+        Product product =
+                productService.getProductById(id);
+
+        if (product == null) {
+            return new ApiResponse<>(
+                    false,
+                    "Khong tim thay san pham voi ID: " + id,
+                    null
+            );
+        }
+
+        return new ApiResponse<>(
+                true,
+                "Tim thay san pham",
+                product
+        );
+    }
+
+    // =========================================================
+    // POST - Them san pham moi
+    // =========================================================
+
+    @PostMapping
+    public ApiResponse<Product> addProduct(
+            @Valid @RequestBody Product product) {
+
+        // Kiem tra ID da ton tai hay chua
+        Product existingProduct =
+                productService.getProductById(product.getId());
+
+        if (existingProduct != null) {
+            return new ApiResponse<>(
+                    false,
+                    "ID san pham da ton tai: " + product.getId(),
+                    null
+            );
+        }
+
+        // Kiem tra ma QR da ton tai hay chua
+        Product existingQrProduct =
+                productService.getProductByQrCode(
+                        product.getQrCode()
+                );
+
+        if (existingQrProduct != null) {
+            return new ApiResponse<>(
+                    false,
+                    "Ma QR da ton tai: " + product.getQrCode(),
+                    null
+            );
+        }
+
+        boolean added =
+                productService.addProduct(product);
+
+        if (added) {
+            return new ApiResponse<>(
+                    true,
+                    "Them san pham thanh cong",
+                    product
+            );
+        }
+
+        return new ApiResponse<>(
+                false,
+                "Them san pham that bai",
+                null
+        );
+    }
+
+    // =========================================================
+    // PUT - Cap nhat san pham
+    // =========================================================
+
+    @PutMapping("/{id}")
+    public ApiResponse<Product> updateProduct(
+            @PathVariable("id") String id,
+            @Valid @RequestBody ProductUpdateRequest request) {
+    	if (!isValidProductId(id)) {
+    	    return new ApiResponse<>(
+    	            false,
+    	            "ID san pham khong dung dinh dang",
+    	            null
+    	    );
+    	}
+
+        Product existingProduct =
+                productService.getProductById(id);
+
+        if (existingProduct == null) {
+            return new ApiResponse<>(
+                    false,
+                    "Khong tim thay san pham voi ID: " + id,
+                    null
+            );
+        }
+        Product qrProduct =
+                productService.getProductByQrCode(
+                        request.getQrCode()
+                );
+
+        if (qrProduct != null &&
+                !qrProduct.getId().equals(id)) {
+
+            return new ApiResponse<>(
+                    false,
+                    "Ma QR da duoc su dung boi san pham: "
+                            + qrProduct.getId(),
+                    null
+            );
+        }
+
+        Product product = new Product(
+                id,
+                request.getName(),
+                request.getCategory(),
+                request.getPrice(),
+                request.getShelfId(),
+                request.getXCoord(),
+                request.getYCoord(),
+                request.getQrCode()
+        );
+
+        boolean updated =
+                productService.updateProduct(product);
+
+        if (updated) {
+            return new ApiResponse<>(
+                    true,
+                    "Cap nhat san pham thanh cong",
+                    product
+            );
+        }
+
+        return new ApiResponse<>(
+                false,
+                "Cap nhat san pham that bai",
+                null
+        );
+    }
+
+    // =========================================================
+    // DELETE - Xoa san pham theo ID
+    // =========================================================
+
+    @DeleteMapping("/{id}")
+    public ApiResponse<String> deleteProduct(
+            @PathVariable("id") String id) {
+    	if (!isValidProductId(id)) {
+    	        return new ApiResponse<>(
+    	                false,
+    	                "ID san pham khong dung dinh dang",
+    	                null
+    	        );
+    	    }
+
+        Product existingProduct =
+                productService.getProductById(id);
+
+        if (existingProduct == null) {
+            return new ApiResponse<>(
+                    false,
+                    "Khong tim thay san pham voi ID: " + id,
+                    null
+            );
+        }
+        
+
+        boolean deleted =
+                productService.deleteProduct(id);
+
+        if (deleted) {
+            return new ApiResponse<>(
+                    true,
+                    "Xoa san pham thanh cong",
+                    id
+            );
+        }
+
+        return new ApiResponse<>(
+                false,
+                "Xoa san pham that bai",
+                null
+        );
+    }
+    private boolean isValidProductId(String id) {
+        return id != null && id.matches("P\\d{3}");
+    }
+    @GetMapping("/debug/database")
+    public ApiResponse<String> debugDatabase() {
+        productService.debugDatabase();
+
+        return new ApiResponse<>(
+                true,
+                "Da in thong tin database ra Console",
+                "Kiem tra Console trong Eclipse"
+        );
+    }
+}

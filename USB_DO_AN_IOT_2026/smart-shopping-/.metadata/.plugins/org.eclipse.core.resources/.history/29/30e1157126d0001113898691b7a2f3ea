@@ -1,0 +1,383 @@
+package com.smartcart.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.smartcart.database.DatabaseConnection;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+
+@Service
+public class GeminiService {
+
+    private static final String API_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + "gemini-3.8-flash:generateContent";
+
+    private final String apiKey;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+    private final DatabaseConnection databaseConnection;
+
+    public GeminiService(
+            @Value("${gemini.api.key}") String apiKey,
+            ObjectMapper objectMapper,
+            DatabaseConnection databaseConnection) {
+
+        this.apiKey = apiKey;
+        this.objectMapper = objectMapper;
+        this.databaseConnection = databaseConnection;
+
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
+    }
+
+    /**
+     * Tra loi nguoi dung bang tieng Viet.
+     * Gemini duoc cung cap danh muc san pham thuc te tu SQLite
+     * de tu van mon an va nguyen lieu theo ngan sach.
+     */
+    public String chat(String message)
+            throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Vui long nhap noi dung can tu van."
+            );
+        }
+
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "Chua cau hinh GEMINI_API_KEY."
+            );
+        }
+
+        // Doc danh muc san pham tu SQLite.
+        String productCatalog = loadProductCatalog();
+
+        // Tao huong dan cho Gemini.
+        String systemPrompt = buildSystemPrompt(productCatalog);
+
+        ObjectNode requestBody = objectMapper.createObjectNode();
+
+        ArrayNode contents = requestBody.putArray("contents");
+
+        ObjectNode content = contents.addObject();
+
+        ArrayNode parts = content.putArray("parts");
+
+        parts.addObject().put("text", systemPrompt);
+
+        parts.addObject().put("text",
+                "YEU CAU CUA NGUOI DUNG:\n" + message);
+
+        ObjectNode generationConfig =
+                requestBody.putObject("generationConfig");
+
+        generationConfig.put("temperature", 0.4);
+        generationConfig.put("maxOutputTokens", 2048);
+
+        String jsonBody =
+                objectMapper.writeValueAsString(requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .timeout(Duration.ofSeconds(180))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() < 200
+                || response.statusCode() >= 300) {
+
+            System.err.println(
+                    "Gemini API HTTP status: "
+                    + response.statusCode()
+            );
+
+            System.err.println(
+                    "Gemini API response: " + response.body()
+            );
+
+            throw new IOException(
+                    "Gemini API loi HTTP "
+                    + response.statusCode()
+                    + ". Hay kiem tra API key, model va han muc su dung."
+            );
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+
+        JsonNode candidates = root.path("candidates");
+
+        if (!candidates.isArray() || candidates.isEmpty()) {
+            throw new IOException(
+                    "Gemini khong tra ve cau tra loi. "
+                    + "Vui long thu lai voi yeu cau ngan gon hon."
+            );
+        }
+
+        JsonNode partsResponse = candidates.path(0)
+                .path("content")
+                .path("parts");
+
+        StringBuilder reply = new StringBuilder();
+
+        if (partsResponse.isArray()) {
+            for (JsonNode part : partsResponse) {
+                JsonNode textNode = part.path("text");
+
+                if (!textNode.isMissingNode()
+                        && !textNode.isNull()) {
+
+                    if (!reply.isEmpty()) {
+                        reply.append("\n");
+                    }
+
+                    reply.append(textNode.asText());
+                }
+            }
+        }
+
+        if (reply.isEmpty()) {
+            throw new IOException(
+                    "Gemini khong tra ve noi dung hop le."
+            );
+        }
+
+        return reply.toString().trim();
+    }
+
+    /**
+     * Tao huong dan de Gemini tro thanh tro ly goi y mon an.
+     */
+    private String buildSystemPrompt(String productCatalog) {
+
+        return """
+                BAN LA TRO LY AM THUC CUA UNG DUNG SMART SHOPPING CART.
+
+                NHIEM VU CHINH:
+                - Tu van mon an theo ngan sach nguoi dung.
+                - Goi y mon an cho so nguoi an cu the.
+                - Goi y mon lau, ga ran, mon xao, mon chien,
+                  mon canh, mon gia dinh, mon tiet kiem va thuc don.
+                - Liet ke nguyen lieu can mua va so luong de nau.
+                - Uu tien cac san pham co trong danh muc sieu thi.
+                - Huong dan cach nau ngan gon, de lam.
+                - Giu tong tien phu hop ngan sach neu nguoi dung cung cap.
+
+                QUY TAC SU DUNG DANH MUC:
+                1. Danh muc duoi day duoc lay tu co so du lieu SQLite.
+                2. Chi su dung gia tien, ma san pham va vi tri ke
+                   co trong danh muc duoc cung cap.
+                3. Khong tu tao ma san pham, gia tien hoac vi tri ke.
+                4. Neu khong tim thay nguyen lieu phu hop,
+                   hay noi ro nguyen lieu do chua co trong danh muc.
+                5. Gia san pham la gia cua mot don vi dong goi
+                   duoc ghi trong ten san pham.
+                6. Neu mua nhieu don vi, tinh thanh tien bang:
+                   gia mot don vi nhan so don vi mua.
+                7. Cong cac thanh tien de uoc tinh tong tien.
+                8. Khong khang dinh tong tien da duoc tinh chinh xac
+                   neu chua co du thong tin san pham.
+                9. Khong tu dong chuyen moi yeu cau thanh tim kiem
+                   ten san pham. Hay uu tien tu van mon an.
+                10. Neu nguoi dung chi chao hoi, hay tra loi than thien.
+                11. Neu nguoi dung hoi ngoai pham vi nau an,
+                    hay tra loi ngan gon va huu ich.
+
+                DINH DANG GOI Y MON AN:
+                - Ten mon an.
+                - So nguoi an.
+                - Nguyen lieu can mua.
+                - Ten san pham trong sieu thi.
+                - Ma san pham neu co trong danh muc.
+                - So luong dong goi can mua.
+                - Gia mot dong goi.
+                - Thanh tien tung nguyen lieu.
+                - Tong tien uoc tinh.
+                - Cach nau ngan gon.
+                - Vi tri ke de tim nguyen lieu.
+
+                NEU CO NGUY CO VUOT NGAN SACH:
+                - Hay dieu chinh so luong hoac goi y mon khac.
+                - Neu van khong the dap ung, hay noi ro ly do.
+                - Khong bo bot nguyen lieu quan trong chi de lam
+                  cho tong tien co ve nam trong ngan sach.
+
+                Cach giao tiep:
+                - Luon tra loi bang tieng Viet.
+                - Than thien, ro rang va thuc te.
+                - Uu tien cac goi y de nau tai nha.
+                - Khong viet qua dai neu nguoi dung khong yeu cau.
+                - Khong tu nhan minh da them nguyen lieu vao gio hang.
+                  Chi noi da them vao gio khi he thong thuc su thuc hien.
+
+                DANH MUC SAN PHAM HIEN CO:
+                """ + "\n" + productCatalog;
+    }
+
+    /**
+     * Lay san pham tu SQLite.
+     *
+     * Moi nhom san pham lay toi da 2 quy cach co gia thap
+     * trong 30 nhom ten san pham dau tien cua moi danh muc.
+     * Cach nay giup Gemini biet nhieu loai hang ma khong can
+     * gui ca 3000 dong san pham vao moi yeu cau.
+     */
+    private String loadProductCatalog() throws IOException {
+
+        String sql = """
+                WITH normalized AS (
+                    SELECT
+                        id,
+                        name,
+                        category,
+                        price,
+                        shelf_id,
+                        x_coord,
+                        y_coord,
+
+                        CASE
+                            WHEN instr(name, ' - ') > 0
+                            THEN trim(
+                                substr(name, 1, instr(name, ' - ') - 1)
+                            )
+                            ELSE trim(name)
+                        END AS base_name,
+
+                        ROW_NUMBER() OVER (
+                            PARTITION BY
+                                category,
+                                CASE
+                                    WHEN instr(name, ' - ') > 0
+                                    THEN trim(
+                                        substr(
+                                            name,
+                                            1,
+                                            instr(name, ' - ') - 1
+                                        )
+                                    )
+                                    ELSE trim(name)
+                                END
+                            ORDER BY price ASC, name ASC
+                        ) AS variant_rank,
+
+                        DENSE_RANK() OVER (
+                            PARTITION BY category
+                            ORDER BY
+                                CASE
+                                    WHEN instr(name, ' - ') > 0
+                                    THEN trim(
+                                        substr(
+                                            name,
+                                            1,
+                                            instr(name, ' - ') - 1
+                                        )
+                                    )
+                                    ELSE trim(name)
+                                END
+                        ) AS base_rank
+
+                    FROM Products
+                    WHERE price > 0
+                )
+
+                SELECT
+                    id,
+                    name,
+                    category,
+                    price,
+                    shelf_id,
+                    x_coord,
+                    y_coord
+
+                FROM normalized
+
+                WHERE variant_rank <= 2
+                  AND base_rank <= 30
+
+                ORDER BY category, base_name, price
+                """;
+
+        StringBuilder catalog = new StringBuilder();
+
+        try (Connection connection =
+                     databaseConnection.getConnection();
+
+             PreparedStatement statement =
+                     connection.prepareStatement(sql);
+
+             ResultSet resultSet = statement.executeQuery()) {
+
+            while (resultSet.next()) {
+
+                catalog.append("- Ma: ")
+                        .append(resultSet.getString("id"));
+
+                catalog.append(" | Ten: ")
+                        .append(resultSet.getString("name"));
+
+                catalog.append(" | Danh muc: ")
+                        .append(resultSet.getString("category"));
+
+                catalog.append(" | Gia: ")
+                        .append(resultSet.getLong("price"))
+                        .append(" VND");
+
+                catalog.append(" | Ke: ")
+                        .append(resultSet.getString("shelf_id"));
+
+                catalog.append(" | Toa do: (")
+                        .append(resultSet.getString("x_coord"))
+                        .append(", ")
+                        .append(resultSet.getString("y_coord"))
+                        .append(")");
+
+                catalog.append("\n");
+            }
+
+        } catch (SQLException e) {
+
+            System.err.println(
+                    "Khong doc duoc danh muc SQLite: "
+                    + e.getMessage()
+            );
+
+            throw new IOException(
+                    "Khong the doc danh muc san pham tu SQLite. "
+                    + "Hay kiem tra duong dan database va bang Products.",
+                    e
+            );
+        }
+
+        if (catalog.isEmpty()) {
+            throw new IOException(
+                    "Danh muc SQLite khong co san pham hop le."
+            );
+        }
+
+        return catalog.toString();
+    }
+}

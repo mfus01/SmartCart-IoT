@@ -1,0 +1,436 @@
+import { searchProducts } from "../api/productApi.js";
+import { highlightProductOnMap } from "../map/map.js";
+import { addToCart } from "../cart/cart.js";
+
+// ======================================================
+// DOM
+// ======================================================
+
+const chatInput = document.getElementById("chatInput");
+const sendButton = document.getElementById("sendButton");
+const chatMessages = document.getElementById("chatMessages");
+
+let isSending = false;
+
+// ======================================================
+// CHUAN HOA TIENG VIET
+// ======================================================
+
+function normalizeText(message) {
+return String(message ?? "")
+.normalize("NFD")
+.replace(/[\u0300-\u036f]/g, "")
+.replace(/đ/g, "d")
+.replace(/Đ/g, "D")
+.toLowerCase()
+.trim();
+}
+
+// ======================================================
+// TACH TU KHOA SAN PHAM
+// Vi du: "ca rot o dau" -> "ca rot"
+// ======================================================
+
+function extractProductKeyword(message) {
+let keyword = normalizeText(message)
+.replace(/[?!.,;:]/g, " ")
+.replace(/\s+/g, " ")
+.trim();
+
+const phrasesToRemove = [
+    "cho toi biet",
+    "giup toi tim",
+    "tim kiem san pham",
+    "tim san pham",
+    "toi muon mua",
+    "toi can mua",
+    "nam o dau",
+    "o dau",
+    "ke nao",
+    "vi tri",
+    "bao nhieu tien",
+    "gia bao nhieu",
+    "toi muon",
+    "toi can",
+    "hay tim",
+    "tim kiem",
+    "san pham",
+    "mua",
+    "tim",
+    "gia"
+];
+
+phrasesToRemove.sort((a, b) => b.length - a.length);
+
+for (const phrase of phrasesToRemove) {
+    const escapedPhrase = phrase.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+    );
+
+    keyword = keyword.replace(
+        new RegExp("\\b" + escapedPhrase + "\\b", "g"),
+        " "
+    );
+}
+
+return keyword.replace(/\s+/g, " ").trim();
+
+}
+
+// ======================================================
+// PHAN LOAI YEU CAU
+// true: tim san pham
+// false: hoi dap bang Gemini
+// ======================================================
+
+function isLikelyProductQuery(message) {
+const text = normalizeText(message);
+
+// Cac cau giao tiep thong thuong nen gui cho Gemini
+const generalPatterns = [
+    /^xin chao\b/,
+    /^chao\b/,
+    /^hello\b/,
+    /^hi\b/,
+    /\bban la ai\b/,
+    /\bban co the giup gi\b/,
+    /\bgioi thieu\b/,
+    /\bcam on\b/,
+    /\btam biet\b/,
+    /\bke cho toi nghe\b/,
+    /\bgiai thich\b/,
+    /\bhuong dan\b/
+];
+
+if (generalPatterns.some(pattern => pattern.test(text))) {
+    return false;
+}
+
+// Cac cau co y dinh tim san pham hoac hoi vi tri/gia
+const productPatterns = [
+    /\bo dau\b/,
+    /\bke\b/,
+    /\bvi tri\b/,
+    /\btim\b/,
+    /\bmua\b/,
+    /\bgia\b/,
+    /\bbao nhieu\b/,
+    /\bsan pham\b/,
+    /\bcon hang\b/,
+    /\bton kho\b/,
+    /\bco .* khong\b/
+];
+
+if (productPatterns.some(pattern => pattern.test(text))) {
+    return true;
+}
+
+// Chuoi ngan thuong la ten san pham, vi du "ca rot", "sua tuoi"
+const words = text.split(/\s+/).filter(Boolean);
+
+return words.length > 0 && words.length <= 4;
+
+}
+
+// ======================================================
+// THEM TIN NHAN CHAT
+// ======================================================
+
+function addChatMessage(message, type) {
+if (!chatMessages) {
+console.error("Khong tim thay phan tu chatMessages.");
+return null;
+}
+
+const element = document.createElement("p");
+
+element.textContent = message;
+element.classList.add("chat-message");
+
+if (type === "user") {
+    element.style.background = "#1565c0";
+    element.style.color = "white";
+} else {
+    element.style.background = "#e3f2fd";
+    element.style.color = "#222";
+}
+
+element.style.padding = "12px";
+element.style.borderRadius = "8px";
+element.style.marginBottom = "10px";
+element.style.whiteSpace = "pre-wrap";
+
+chatMessages.appendChild(element);
+chatMessages.scrollTop = chatMessages.scrollHeight;
+
+return element;
+
+}
+
+// ======================================================
+// XOA KET QUA TIM KIEM CU
+// Khong xoa tin nhan chat hoac thong bao gio hang
+// ======================================================
+
+function clearPreviousSearchResults() {
+if (!chatMessages) {
+return;
+}
+
+chatMessages
+    .querySelectorAll(".product-result")
+    .forEach(element => element.remove());
+
+}
+
+// ======================================================
+// HIEN THI SAN PHAM
+// ======================================================
+
+function addProductResultMessage(product) {
+const container = document.createElement("div");
+
+container.classList.add("product-result");
+
+container.style.background = "#e3f2fd";
+container.style.color = "#222";
+container.style.padding = "12px";
+container.style.marginBottom = "10px";
+container.style.borderRadius = "8px";
+
+const textElement = document.createElement("div");
+const price = Number(product.price);
+
+textElement.textContent =
+    "Tìm thấy: " +
+    product.name +
+    " | Giá: " +
+    (Number.isFinite(price)
+        ? price.toLocaleString("vi-VN")
+        : "Chưa có giá") +
+    " VND | Kệ " +
+    (product.shelfId ?? "Chưa xác định") +
+    " | Tọa độ: (" +
+    (product.xCoord ?? "?") +
+    ", " +
+    (product.yCoord ?? "?") +
+    ")";
+
+const addButton = document.createElement("button");
+
+addButton.textContent = "Thêm vào giỏ";
+addButton.style.marginTop = "10px";
+addButton.style.padding = "8px 12px";
+addButton.style.border = "none";
+addButton.style.borderRadius = "6px";
+addButton.style.background = "#2e7d32";
+addButton.style.color = "white";
+addButton.style.cursor = "pointer";
+
+addButton.addEventListener("click", function () {
+    try {
+        addToCart(product);
+
+        addChatMessage(
+            "Đã thêm " + product.name + " vào giỏ hàng.",
+            "bot"
+        );
+    } catch (error) {
+        console.error("Lỗi thêm sản phẩm vào giỏ:", error);
+
+        addChatMessage(
+            "Không thể thêm sản phẩm vào giỏ hàng.",
+            "bot"
+        );
+    }
+});
+
+container.appendChild(textElement);
+container.appendChild(addButton);
+
+chatMessages.appendChild(container);
+chatMessages.scrollTop = chatMessages.scrollHeight;
+
+}
+
+// ======================================================
+// GOI GEMINI
+// Backend: POST /api/chat/gemini
+// ======================================================
+
+async function askGemini(message) {
+const loadingMessage = addChatMessage(
+"Gemini đang suy nghĩ, vui lòng chờ...",
+"bot"
+);
+
+if (loadingMessage) {
+    loadingMessage.classList.add("gemini-loading");
+}
+
+try {
+    const response = await fetch("/api/chat/gemini", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            message: message
+        })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        throw new Error(
+            result.message || "Gemini chưa thể trả lời."
+        );
+    }
+
+    if (loadingMessage) {
+        loadingMessage.remove();
+    }
+
+    addChatMessage(result.reply, "bot");
+
+} catch (error) {
+    console.error("Lỗi gọi Gemini:", error);
+
+    if (loadingMessage) {
+        loadingMessage.remove();
+    }
+
+    addChatMessage(
+        "Không thể nhận câu trả lời từ Gemini: " +
+        (error.message || "Lỗi kết nối."),
+        "bot"
+    );
+}
+
+}
+
+// ======================================================
+// TIM SAN PHAM TRONG DATABASE
+// ======================================================
+
+async function handleSearchProduct(message) {
+clearPreviousSearchResults();
+
+const searchKeyword = extractProductKeyword(message) || message;
+
+console.log("Câu người dùng:", message);
+console.log("Từ khóa tìm kiếm:", searchKeyword);
+
+try {
+    const result = await searchProducts(searchKeyword);
+
+    if (!result || !result.success) {
+        addChatMessage(
+            result?.message || "Không thể tìm kiếm sản phẩm.",
+            "bot"
+        );
+        return;
+    }
+
+    const products = Array.isArray(result.data)
+        ? result.data
+        : [];
+
+    if (products.length === 0) {
+        addChatMessage(
+            "Không tìm thấy sản phẩm phù hợp với từ khóa: " +
+            searchKeyword,
+            "bot"
+        );
+        return;
+    }
+
+    // Danh dau san pham dau tien tren ban do
+    highlightProductOnMap(products[0]);
+
+    // Hien thi cac san pham tim duoc
+    products.forEach(product => {
+        addProductResultMessage(product);
+    });
+
+} catch (error) {
+    console.error("Lỗi tìm sản phẩm:", error);
+
+    addChatMessage(
+        "Không thể kết nối đến Backend để tìm sản phẩm.",
+        "bot"
+    );
+}
+
+}
+
+// ======================================================
+// XU LY TIN NHAN
+// Tim san pham hoac hoi dap bang Gemini
+// ======================================================
+
+async function handleSendMessage() {
+if (!chatInput || !sendButton || !chatMessages) {
+console.error("Thiếu thành phần giao diện chat.");
+return;
+}
+
+if (isSending) {
+    return;
+}
+
+const message = chatInput.value.trim();
+
+if (!message) {
+    return;
+}
+
+addChatMessage(message, "user");
+
+chatInput.value = "";
+isSending = true;
+sendButton.disabled = true;
+
+try {
+    if (isLikelyProductQuery(message)) {
+        await handleSearchProduct(message);
+    } else {
+        await askGemini(message);
+    }
+} finally {
+    isSending = false;
+    sendButton.disabled = false;
+    chatInput.focus();
+}
+
+}
+
+// ======================================================
+// KHOI DONG CHAT
+// ======================================================
+
+function handleInputKeydown(event) {
+if (event.key === "Enter" && !event.isComposing) {
+event.preventDefault();
+handleSendMessage();
+}
+}
+
+export function initChat() {
+if (!chatInput || !sendButton || !chatMessages) {
+console.error(
+"Không thể khởi động chat: thiếu phần tử HTML."
+);
+return;
+}
+
+sendButton.removeEventListener("click", handleSendMessage);
+sendButton.addEventListener("click", handleSendMessage);
+
+chatInput.removeEventListener("keydown", handleInputKeydown);
+chatInput.addEventListener("keydown", handleInputKeydown);
+
+console.log("Chat module đã khởi động.");
+
+}

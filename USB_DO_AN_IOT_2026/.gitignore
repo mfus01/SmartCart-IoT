@@ -1,0 +1,13 @@
+# Bo qua 2 file cai dat lon
+03_INSTALLERS/VSCodeUserSetup-x64-1.137.0.exe
+03_INSTALLERS/arduino-ide_2.3.10_Windows_64bit.exe
+
+# Bo qua file chua thong tin nhay cam
+.env
+.env.*
+!.env.example
+
+# Bo qua thu muc thu vien va file tam
+node_modules/
+__pycache__/
+*.pyc

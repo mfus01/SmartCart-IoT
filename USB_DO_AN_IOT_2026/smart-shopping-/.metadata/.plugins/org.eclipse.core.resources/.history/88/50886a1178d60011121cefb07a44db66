@@ -1,0 +1,447 @@
+// ======================================================
+// CART MODULE
+// Quan ly gio hang
+// ======================================================
+
+let cart = [];
+
+
+const cartItemsElement =
+    document.getElementById(
+        "cartItems"
+    );
+
+
+const totalPriceElement =
+    document.getElementById(
+        "totalPrice"
+    );
+
+
+// ======================================================
+// TANG SO LUONG
+// ======================================================
+
+function increaseQuantity(
+    productId
+) {
+
+    const item =
+        cart.find(
+            product =>
+                product.id === productId
+        );
+
+
+    if (!item) {
+        return;
+    }
+
+
+    item.quantity += 1;
+
+
+    renderCart();
+}
+
+
+// ======================================================
+// GIAM SO LUONG
+// ======================================================
+
+function decreaseQuantity(
+    productId
+) {
+
+    const item =
+        cart.find(
+            product =>
+                product.id === productId
+        );
+
+
+    if (!item) {
+        return;
+    }
+
+
+    item.quantity -= 1;
+
+
+    if (item.quantity <= 0) {
+
+        cart =
+            cart.filter(
+                product =>
+                    product.id !== productId
+            );
+    }
+
+
+    renderCart();
+}
+
+
+// ======================================================
+// XOA SAN PHAM
+// ======================================================
+
+function removeFromCart(
+    productId
+) {
+
+    cart =
+        cart.filter(
+            product =>
+                product.id !== productId
+        );
+
+
+    renderCart();
+}
+
+
+// ======================================================
+// TAO BUTTON
+// ======================================================
+
+function createButton(
+    text,
+    clickHandler
+) {
+
+    const button =
+        document.createElement(
+            "button"
+        );
+
+
+    button.textContent =
+        text;
+
+
+    button.style.marginRight =
+        "5px";
+
+
+    button.style.marginTop =
+        "8px";
+
+
+    button.style.padding =
+        "5px 9px";
+
+
+    button.style.border =
+        "none";
+
+
+    button.style.borderRadius =
+        "5px";
+
+
+    button.style.cursor =
+        "pointer";
+
+
+    button.addEventListener(
+        "click",
+        clickHandler
+    );
+
+
+    return button;
+}
+
+
+// ======================================================
+// HIEN THI GIO HANG
+// ======================================================
+
+export function renderCart() {
+
+    cartItemsElement.innerHTML =
+        "";
+
+
+    if (cart.length === 0) {
+
+        const emptyMessage =
+            document.createElement(
+                "p"
+            );
+
+
+        emptyMessage.textContent =
+            "Chua co san pham.";
+
+
+        cartItemsElement.appendChild(
+            emptyMessage
+        );
+
+
+        totalPriceElement.textContent =
+            "0 VND";
+
+
+        return;
+    }
+
+
+    let totalPrice = 0;
+
+
+    cart.forEach(item => {
+
+        const itemTotal =
+            item.price
+            * item.quantity;
+
+
+        totalPrice +=
+            itemTotal;
+
+
+        const itemElement =
+            document.createElement(
+                "div"
+            );
+
+
+        itemElement.style.padding =
+            "10px 0";
+
+
+        itemElement.style.borderBottom =
+            "1px solid #dddddd";
+
+
+        // --------------------------
+        // TEN SAN PHAM
+        // --------------------------
+
+        const nameElement =
+            document.createElement(
+                "strong"
+            );
+
+
+        nameElement.textContent =
+            item.name;
+
+
+        // --------------------------
+        // GIA
+        // --------------------------
+
+        const detailElement =
+            document.createElement(
+                "div"
+            );
+
+
+        detailElement.style.marginTop =
+            "5px";
+
+
+        detailElement.textContent =
+            item.price
+                .toLocaleString(
+                    "vi-VN"
+                )
+            + " VND x "
+            + item.quantity;
+
+
+        // --------------------------
+        // THANH TIEN
+        // --------------------------
+
+        const subtotalElement =
+            document.createElement(
+                "div"
+            );
+
+
+        subtotalElement.style.marginTop =
+            "4px";
+
+
+        subtotalElement.textContent =
+            "Thanh tien: "
+            + itemTotal
+                .toLocaleString(
+                    "vi-VN"
+                )
+            + " VND";
+
+
+        // --------------------------
+        // CAC NUT
+        // --------------------------
+
+        const buttonContainer =
+            document.createElement(
+                "div"
+            );
+
+
+        const decreaseButton =
+            createButton(
+                "-",
+                function() {
+
+                    decreaseQuantity(
+                        item.id
+                    );
+                }
+            );
+
+
+        const increaseButton =
+            createButton(
+                "+",
+                function() {
+
+                    increaseQuantity(
+                        item.id
+                    );
+                }
+            );
+
+
+        const removeButton =
+            createButton(
+                "Xoa",
+                function() {
+
+                    removeFromCart(
+                        item.id
+                    );
+                }
+            );
+
+
+        buttonContainer.appendChild(
+            decreaseButton
+        );
+
+
+        buttonContainer.appendChild(
+            increaseButton
+        );
+
+
+        buttonContainer.appendChild(
+            removeButton
+        );
+
+
+        // --------------------------
+        // GAN VAO ITEM
+        // --------------------------
+
+        itemElement.appendChild(
+            nameElement
+        );
+
+
+        itemElement.appendChild(
+            detailElement
+        );
+
+
+        itemElement.appendChild(
+            subtotalElement
+        );
+
+
+        itemElement.appendChild(
+            buttonContainer
+        );
+
+
+        cartItemsElement.appendChild(
+            itemElement
+        );
+    });
+
+
+    totalPriceElement.textContent =
+        totalPrice
+            .toLocaleString(
+                "vi-VN"
+            )
+        + " VND";
+}
+
+
+// ======================================================
+// THEM SAN PHAM VAO GIO
+// ======================================================
+
+export function addToCart(
+    product
+) {
+
+    const existingItem =
+        cart.find(
+            item =>
+                item.id === product.id
+        );
+
+
+    if (existingItem) {
+
+        existingItem.quantity += 1;
+
+    } else {
+
+        cart.push({
+
+            id:
+                product.id,
+
+            name:
+                product.name,
+
+            price:
+                product.price,
+
+            shelfId:
+                product.shelfId,
+
+            xCoord:
+                product.xCoord,
+
+            yCoord:
+                product.yCoord,
+
+            qrCode:
+                product.qrCode,
+
+            quantity:
+                1
+        });
+    }
+
+
+    console.log(
+        "Gio hang hien tai:",
+        cart
+    );
+
+
+    renderCart();
+}
+
+
+// ======================================================
+// LAY DU LIEU GIO HANG
+// ======================================================
+
+export function getCart() {
+
+    return cart;
+}

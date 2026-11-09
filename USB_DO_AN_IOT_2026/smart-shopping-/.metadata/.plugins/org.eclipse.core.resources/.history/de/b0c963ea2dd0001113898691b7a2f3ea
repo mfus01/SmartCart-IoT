@@ -1,0 +1,376 @@
+package com.smartcart.controller;
+
+import java.io.IOException;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.smartcart.model.Product;
+import com.smartcart.service.GeminiService;
+import com.smartcart.service.ProductService;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+@RestController
+@RequestMapping("/api/chat")
+public class GeminiController {
+
+    private final GeminiService geminiService;
+    private final ProductService productService;
+    private final ObjectMapper objectMapper;
+
+    public GeminiController(
+            GeminiService geminiService,
+            ProductService productService,
+            ObjectMapper objectMapper) {
+
+        this.geminiService = geminiService;
+        this.productService = productService;
+        this.objectMapper = objectMapper;
+    }
+
+    @PostMapping("/gemini")
+    public ResponseEntity<Map<String, Object>> chat(
+            @RequestBody Map<String, String> request) {
+
+        String message = request.get("message");
+
+        if (message == null || message.isBlank()) {
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "success", false,
+                            "message", "Vui long nhap noi dung."
+                    )
+            );
+        }
+
+        try {
+            if (isRecipeRequest(message)) {
+                return handleRecipeRequest(message);
+            }
+
+            String reply = geminiService.chat(message);
+
+            return ResponseEntity.ok(
+                    Map.of(
+                            "success", true,
+                            "type", "chat",
+                            "reply", reply
+                    )
+            );
+
+        } catch (InterruptedException e) {
+
+            Thread.currentThread().interrupt();
+
+            return ResponseEntity.status(
+                    HttpStatus.SERVICE_UNAVAILABLE
+            ).body(
+                    Map.of(
+                            "success", false,
+                            "message",
+                            "Yeu cau Gemini bi gian doan. "
+                            + "Vui long thu lai."
+                    )
+            );
+
+        } catch (IOException e) {
+
+            return ResponseEntity.status(
+                    HttpStatus.BAD_GATEWAY
+            ).body(
+                    Map.of(
+                            "success", false,
+                            "message",
+                            "Khong the lay cau tra loi tu Gemini: "
+                            + e.getMessage()
+                    )
+            );
+
+        } catch (IllegalArgumentException e) {
+
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    )
+            );
+
+        } catch (IllegalStateException e) {
+
+            return ResponseEntity.status(
+                    HttpStatus.INTERNAL_SERVER_ERROR
+            ).body(
+                    Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    )
+            );
+        }
+    }
+
+    /**
+     * Xử lý yêu cầu gợi ý món ăn.
+     */
+    private ResponseEntity<Map<String, Object>> handleRecipeRequest(
+            String message)
+            throws IOException, InterruptedException {
+
+        String jsonText =
+                geminiService.suggestRecipeJson(message);
+
+        JsonNode recipe = parseRecipeJson(jsonText);
+
+        String recipeName = recipe.path("recipeName")
+                .asText("Món ăn gợi ý");
+
+        int servings = recipe.path("servings").asInt(0);
+
+        long estimatedBudget = recipe.path("estimatedBudgetVnd")
+                .asLong(0);
+
+        String description = recipe.path("description")
+                .asText("");
+
+        JsonNode ingredientsNode = recipe.path("ingredients");
+
+        if (!ingredientsNode.isArray()
+                || ingredientsNode.isEmpty()) {
+
+            throw new IOException(
+                    "Gemini chua tra ve danh sach nguyen lieu hop le."
+            );
+        }
+
+        List<Map<String, Object>> ingredientResults =
+                new ArrayList<>();
+
+        StringBuilder reply = new StringBuilder();
+
+        reply.append("🍲 GỢI Ý MÓN ĂN: ")
+                .append(recipeName)
+                .append("\n\n");
+
+        if (!description.isBlank()) {
+            reply.append(description)
+                    .append("\n\n");
+        }
+
+        if (servings > 0) {
+            reply.append("👥 Khẩu phần: ")
+                    .append(servings)
+                    .append(" người\n");
+        }
+
+        if (estimatedBudget > 0) {
+            reply.append("💰 Chi phí dự kiến: ")
+                    .append(String.format(
+                            Locale.forLanguageTag("vi-VN"),
+                            "%,d",
+                            estimatedBudget
+                    ))
+                    .append(" VNĐ\n");
+        }
+
+        reply.append("\n🛒 NGUYÊN LIỆU CẦN MUA\n");
+
+        for (JsonNode ingredient : ingredientsNode) {
+
+            String ingredientName = ingredient.path("name")
+                    .asText("")
+                    .trim();
+
+            String quantity = ingredient.path("quantity")
+                    .asText("Chưa xác định")
+                    .trim();
+
+            if (ingredientName.isBlank()) {
+                continue;
+            }
+
+            /*
+             * Tìm nguyên liệu trong database hiện tại.
+             * Không tạo sản phẩm giả nếu database không có.
+             */
+            List<Product> matchedProducts =
+                    productService.searchProducts(ingredientName);
+
+            if (matchedProducts == null) {
+                matchedProducts = List.of();
+            }
+
+            /*
+             * Giới hạn số kết quả cho mỗi nguyên liệu.
+             */
+            List<Product> limitedProducts =
+                    matchedProducts.stream()
+                            .limit(5)
+                            .toList();
+
+            Map<String, Object> item =
+                    new LinkedHashMap<>();
+
+            item.put("name", ingredientName);
+            item.put("quantity", quantity);
+            item.put("found", !limitedProducts.isEmpty());
+            item.put("products", limitedProducts);
+
+            ingredientResults.add(item);
+
+            reply.append("• ")
+                    .append(ingredientName)
+                    .append(" — ")
+                    .append(quantity);
+
+            if (limitedProducts.isEmpty()) {
+
+                reply.append(
+                        "\n  ⚠️ Chưa tìm thấy sản phẩm khớp "
+                        + "trong database."
+                );
+
+            } else {
+
+                reply.append(
+                        "\n  ✅ Tìm thấy "
+                ).append(limitedProducts.size())
+                 .append(" sản phẩm trong siêu thị.");
+            }
+
+            reply.append("\n");
+        }
+
+        JsonNode stepsNode = recipe.path("steps");
+
+        List<String> steps = new ArrayList<>();
+
+        if (stepsNode.isArray() && !stepsNode.isEmpty()) {
+
+            reply.append("\n👨‍🍳 CÁCH CHẾ BIẾN\n");
+
+            int stepNumber = 1;
+
+            for (JsonNode step : stepsNode) {
+
+                String stepText = step.asText("").trim();
+
+                if (stepText.isBlank()) {
+                    continue;
+                }
+
+                steps.add(stepText);
+
+                reply.append(stepNumber++)
+                        .append(". ")
+                        .append(stepText)
+                        .append("\n");
+            }
+        }
+
+        Map<String, Object> response =
+                new LinkedHashMap<>();
+
+        response.put("success", true);
+        response.put("type", "recipe");
+        response.put("reply", reply.toString());
+        response.put("recipeName", recipeName);
+        response.put("servings", servings);
+        response.put("estimatedBudgetVnd", estimatedBudget);
+        response.put("ingredients", ingredientResults);
+        response.put("steps", steps);
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Phân biệt yêu cầu công thức nấu ăn với câu hỏi thông thường.
+     */
+    private boolean isRecipeRequest(String message) {
+
+        String normalized = Normalizer.normalize(
+                message.toLowerCase(Locale.ROOT),
+                Normalizer.Form.NFD
+        ).replaceAll("\\p{M}", "");
+
+        String[] keywords = {
+                "nau gi",
+                "mon an",
+                "goi y mon",
+                "ngan sach",
+                "lam mon",
+                "che bien",
+                "cong thuc",
+                "mon lau",
+                "lau ga",
+                "lau thai",
+                "ga ran",
+                "thuc don",
+                "an gi",
+                "can nguyen lieu",
+                "nguyen lieu"
+        };
+
+        for (String keyword : keywords) {
+            if (normalized.contains(keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Đọc JSON do Gemini trả về.
+     * Có xử lý trường hợp Gemini vô tình thêm dấu Markdown.
+     */
+    private JsonNode parseRecipeJson(String text)
+            throws IOException {
+
+        String json = text == null ? "" : text.trim();
+
+        if (json.startsWith("```")) {
+
+            json = json.replaceFirst(
+                    "^```(?:json)?\\s*",
+                    ""
+            );
+
+            json = json.replaceFirst(
+                    "\\s*```$",
+                    ""
+            ).trim();
+        }
+
+        try {
+
+            JsonNode recipe = objectMapper.readTree(json);
+
+            if (recipe == null || !recipe.isObject()) {
+                throw new IOException(
+                        "Du lieu mon an Gemini tra ve khong hop le."
+                );
+            }
+
+            return recipe;
+
+        } catch (Exception e) {
+
+            throw new IOException(
+                    "Khong doc duoc JSON cong thuc tu Gemini. "
+                    + "Vui long thu lai.",
+                    e
+            );
+        }
+    }
+}

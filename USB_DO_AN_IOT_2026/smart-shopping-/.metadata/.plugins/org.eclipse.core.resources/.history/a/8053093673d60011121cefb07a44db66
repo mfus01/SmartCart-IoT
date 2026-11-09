@@ -1,0 +1,328 @@
+// ======================================================
+// CHAT MODULE - SMART SHOPPING CART
+// Tim san pham va tu van mon an bang Gemini
+// ======================================================
+
+import { searchProducts } from "../api/productApi.js";
+import { highlightProductOnMap } from "../map/map.js";
+import { addToCart } from "../cart/cart.js";
+
+// ======================================================
+// DOM
+// ======================================================
+
+const chatInput = document.getElementById("chatInput");
+const sendButton = document.getElementById("sendButton");
+const chatMessages = document.getElementById("chatMessages");
+
+// ======================================================
+// THEM TIN NHAN
+// ======================================================
+
+function addChatMessage(message, type) {
+    const messageElement = document.createElement("p");
+
+    messageElement.textContent = message;
+    messageElement.classList.add("chat-message");
+
+    messageElement.style.whiteSpace = "pre-wrap";
+    messageElement.style.overflowWrap = "anywhere";
+    messageElement.style.padding = "12px";
+    messageElement.style.borderRadius = "8px";
+    messageElement.style.marginBottom = "10px";
+    messageElement.style.lineHeight = "1.6";
+
+    if (type === "user") {
+        messageElement.style.background = "#1565c0";
+        messageElement.style.color = "#ffffff";
+    } else {
+        messageElement.style.background = "#e3f2fd";
+        messageElement.style.color = "#222222";
+    }
+
+    chatMessages.appendChild(messageElement);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    return messageElement;
+}
+
+// ======================================================
+// XOA CAC THE SAN PHAM CU
+// ======================================================
+
+function clearPreviousSearchResults() {
+    const oldResults = chatMessages.querySelectorAll(".product-result");
+
+    oldResults.forEach(result => result.remove());
+}
+
+// ======================================================
+// HIEN THI SAN PHAM CO TRONG DATABASE
+// ======================================================
+
+function addProductResultMessage(product) {
+    const container = document.createElement("div");
+
+    container.classList.add("product-result");
+
+    container.style.background = "#e3f2fd";
+    container.style.padding = "12px";
+    container.style.marginBottom = "10px";
+    container.style.borderRadius = "8px";
+
+    const textElement = document.createElement("div");
+
+    textElement.textContent =
+        product.name +
+        " | Giá: " +
+        Number(product.price).toLocaleString("vi-VN") +
+        " VNĐ" +
+        " | Kệ " +
+        (product.shelfId ?? "Chưa xác định");
+
+    const addButton = document.createElement("button");
+
+    addButton.textContent = "Thêm vào giỏ";
+
+    addButton.style.marginTop = "10px";
+    addButton.style.padding = "8px 12px";
+    addButton.style.border = "none";
+    addButton.style.borderRadius = "6px";
+    addButton.style.background = "#2e7d32";
+    addButton.style.color = "white";
+    addButton.style.cursor = "pointer";
+
+    addButton.addEventListener("click", function () {
+        try {
+            addToCart(product);
+
+            addChatMessage(
+                "Đã thêm " + product.name + " vào giỏ hàng.",
+                "bot"
+            );
+
+        } catch (error) {
+            console.error("Lỗi thêm sản phẩm:", error);
+
+            addChatMessage(
+                "Không thể thêm sản phẩm vào giỏ hàng.",
+                "bot"
+            );
+        }
+    });
+
+    container.appendChild(textElement);
+    container.appendChild(addButton);
+
+    chatMessages.appendChild(container);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ======================================================
+// GOI GEMINI
+// ======================================================
+
+async function askGemini(message) {
+    const response = await fetch("/api/chat/gemini", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            message: message
+        })
+    });
+
+    let result;
+
+    try {
+        result = await response.json();
+    } catch (error) {
+        throw new Error("Backend trả về dữ liệu không hợp lệ.");
+    }
+
+    if (!response.ok || !result.success) {
+        throw new Error(
+            result.message || "Không thể nhận câu trả lời từ Gemini."
+        );
+    }
+
+    return result;
+}
+
+// ======================================================
+// HIEN THI KET QUA MON AN
+// Chi hien nguyen lieu co san pham khop
+// ======================================================
+
+function displayRecipeResult(result, loadingMessage) {
+    loadingMessage.textContent = result.reply || "Món ăn gợi ý";
+
+    const ingredients = Array.isArray(result.ingredients)
+        ? result.ingredients
+        : [];
+
+    let displayedProducts = 0;
+
+    ingredients.forEach(ingredient => {
+        // Bo qua nguyen lieu khong tim thay san pham.
+        if (
+            !ingredient.found ||
+            !Array.isArray(ingredient.products) ||
+            ingredient.products.length === 0
+        ) {
+            return;
+        }
+
+        // Hien ten nguyen lieu va dinh luong.
+        addChatMessage(
+            ingredient.name + " — " + ingredient.quantity,
+            "bot"
+        );
+
+        ingredient.products.forEach(product => {
+            if (!product || !product.name) {
+                return;
+            }
+
+            addProductResultMessage(product);
+            displayedProducts++;
+        });
+    });
+
+    if (displayedProducts === 0) {
+        addChatMessage(
+            "Chưa tìm thấy sản phẩm phù hợp trong siêu thị.",
+            "bot"
+        );
+    }
+}
+
+// ======================================================
+// XU LY CAU HOI GEMINI
+// ======================================================
+
+async function handleGeminiAdvice(message) {
+    const loadingMessage = addChatMessage(
+        "Đang xử lý yêu cầu...",
+        "bot"
+    );
+
+    try {
+        const result = await askGemini(message);
+
+        if (result.type === "recipe") {
+            displayRecipeResult(result, loadingMessage);
+        } else {
+            loadingMessage.textContent =
+                result.reply || "Chưa có câu trả lời.";
+        }
+
+    } catch (error) {
+        console.error("Lỗi Gemini:", error);
+
+        loadingMessage.textContent =
+            "Không thể nhận câu trả lời: " + error.message;
+    }
+
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ======================================================
+// TIM SAN PHAM
+// ======================================================
+
+async function handleSearchProduct(keyword) {
+    clearPreviousSearchResults();
+
+    try {
+        const result = await searchProducts(keyword);
+
+        const products =
+            result &&
+            result.success &&
+            Array.isArray(result.data)
+                ? result.data
+                : [];
+
+        if (products.length > 0) {
+            highlightProductOnMap(products[0]);
+
+            products.forEach(product => {
+                addProductResultMessage(product);
+            });
+
+            return;
+        }
+
+    } catch (error) {
+        console.warn("Tìm sản phẩm thất bại:", error);
+    }
+
+    // Neu khong tim thay san pham, chuyen sang Gemini.
+    await handleGeminiAdvice(keyword);
+}
+
+// ======================================================
+// GUI TIN NHAN
+// ======================================================
+
+async function handleSendMessage() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error("Không tìm thấy các phần tử giao diện chat.");
+        return;
+    }
+
+    const keyword = chatInput.value.trim();
+
+    if (keyword === "" || sendButton.disabled) {
+        return;
+    }
+
+    addChatMessage(keyword, "user");
+
+    chatInput.value = "";
+    sendButton.disabled = true;
+
+    const originalButtonText = sendButton.textContent;
+
+    sendButton.textContent = "Đang xử lý...";
+
+    try {
+        await handleSearchProduct(keyword);
+    } finally {
+        sendButton.disabled = false;
+        sendButton.textContent = originalButtonText;
+        chatInput.focus();
+    }
+}
+
+// ======================================================
+// XU LY PHIM ENTER
+// ======================================================
+
+function handleInputKeydown(event) {
+    if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        handleSendMessage();
+    }
+}
+
+// ======================================================
+// KHOI DONG CHAT
+// ======================================================
+
+export function initChat() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error("Không thể khởi động chat: thiếu phần tử HTML.");
+        return;
+    }
+
+    sendButton.removeEventListener("click", handleSendMessage);
+    chatInput.removeEventListener("keydown", handleInputKeydown);
+
+    sendButton.addEventListener("click", handleSendMessage);
+    chatInput.addEventListener("keydown", handleInputKeydown);
+
+    console.log("Chat đã sẵn sàng.");
+}

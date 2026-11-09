@@ -1,0 +1,4 @@
+2026/11/07-01:11:03.650 65a8 Reusing MANIFEST D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/MANIFEST-000001
+2026/11/07-01:11:03.696 65a8 Recovering log #3
+2026/11/07-01:11:03.710 65a8 (ignoring error) D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/000003.log: dropping 45 bytes; Corruption: checksum mismatch
+2026/11/07-01:11:03.754 65a8 Reusing old log D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/000003.log 

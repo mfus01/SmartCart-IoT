@@ -1,0 +1,397 @@
+package com.smartcart.controller;
+
+import java.io.IOException;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.smartcart.model.Product;
+import com.smartcart.service.GeminiService;
+import com.smartcart.service.ProductService;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+@RestController
+@RequestMapping("/api/chat")
+public class GeminiController {
+
+private static final int MAX_PRODUCTS_PER_INGREDIENT = 3;
+
+private final GeminiService geminiService;
+private final ProductService productService;
+private final ObjectMapper objectMapper;
+
+public GeminiController(
+        GeminiService geminiService,
+        ProductService productService,
+        ObjectMapper objectMapper) {
+
+    this.geminiService = geminiService;
+    this.productService = productService;
+    this.objectMapper = objectMapper;
+}
+
+@PostMapping("/gemini")
+public ResponseEntity<Map<String, Object>> chat(
+        @RequestBody Map<String, String> request) {
+
+    String message = request.get("message");
+
+    if (message == null || message.isBlank()) {
+        return ResponseEntity.badRequest().body(
+                Map.of(
+                        "success", false,
+                        "message", "Vui lòng nhập nội dung."
+                )
+        );
+    }
+
+    try {
+        if (isRecipeRequest(message)) {
+            return handleRecipeRequest(message);
+        }
+
+        String reply = geminiService.chat(message);
+
+        return ResponseEntity.ok(
+                Map.of(
+                        "success", true,
+                        "type", "chat",
+                        "reply", reply
+                )
+        );
+
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+
+        return ResponseEntity.status(
+                HttpStatus.SERVICE_UNAVAILABLE
+        ).body(
+                Map.of(
+                        "success", false,
+                        "message", "Yêu cầu bị gián đoạn. Vui lòng thử lại."
+                )
+        );
+
+    } catch (IOException e) {
+        System.err.println("Gemini error: " + e.getMessage());
+
+        return ResponseEntity.status(
+                HttpStatus.BAD_GATEWAY
+        ).body(
+                Map.of(
+                        "success", false,
+                        "message", "Không thể nhận câu trả lời: "
+                                + e.getMessage()
+                )
+        );
+
+    } catch (IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(
+                Map.of(
+                        "success", false,
+                        "message", e.getMessage()
+                )
+        );
+
+    } catch (IllegalStateException e) {
+        return ResponseEntity.status(
+                HttpStatus.INTERNAL_SERVER_ERROR
+        ).body(
+                Map.of(
+                        "success", false,
+                        "message", e.getMessage()
+                )
+        );
+    }
+}
+
+/**
+ * Xu ly yeu cau goi y mon an.
+ */
+private ResponseEntity<Map<String, Object>> handleRecipeRequest(
+        String message)
+        throws IOException, InterruptedException {
+
+    String jsonText = geminiService.suggestRecipeJson(message);
+
+    JsonNode recipe = parseRecipeJson(jsonText);
+
+    String recipeName = recipe.path("recipeName")
+            .asText("Món ăn gợi ý");
+
+    int servings = recipe.path("servings").asInt(0);
+
+    long estimatedBudget = recipe.path("estimatedBudgetVnd")
+            .asLong(0);
+
+    JsonNode ingredientsNode = recipe.path("ingredients");
+
+    List<Map<String, Object>> availableIngredients =
+            new ArrayList<>();
+
+    /*
+     * Lay danh sach san pham tu database mot lan.
+     */
+    List<Product> allProducts = productService.getAllProducts();
+
+    if (allProducts == null) {
+        allProducts = List.of();
+    }
+
+    if (ingredientsNode.isArray()) {
+        for (JsonNode ingredient : ingredientsNode) {
+
+            String ingredientName = ingredient.path("name")
+                    .asText("")
+                    .trim();
+
+            String quantity = ingredient.path("quantity")
+                    .asText("")
+                    .trim();
+
+            if (ingredientName.isBlank()) {
+                continue;
+            }
+
+            List<Product> matchedProducts =
+                    findMatchingProducts(
+                            ingredientName,
+                            allProducts
+                    );
+
+            /*
+             * Khong hien nguyen lieu khong co san pham khop.
+             */
+            if (matchedProducts.isEmpty()) {
+                continue;
+            }
+
+            List<Product> limitedProducts =
+                    matchedProducts.stream()
+                            .limit(MAX_PRODUCTS_PER_INGREDIENT)
+                            .toList();
+
+            Map<String, Object> item = new LinkedHashMap<>();
+
+            item.put("name", ingredientName);
+            item.put("quantity", quantity);
+            item.put("found", true);
+            item.put("products", limitedProducts);
+
+            availableIngredients.add(item);
+        }
+    }
+
+    StringBuilder reply = new StringBuilder();
+
+    reply.append("🍲 ")
+            .append(recipeName)
+            .append("\n");
+
+    if (servings > 0) {
+        reply.append("👥 Khẩu phần: ")
+                .append(servings)
+                .append(" người\n");
+    }
+
+    if (estimatedBudget > 0) {
+        reply.append("💰 Chi phí dự kiến: ")
+                .append(String.format(
+                        Locale.forLanguageTag("vi-VN"),
+                        "%,d",
+                        estimatedBudget
+                ))
+                .append(" VNĐ\n");
+    }
+
+    if (availableIngredients.isEmpty()) {
+        reply.append(
+                "\nChưa tìm thấy sản phẩm phù hợp trong siêu thị."
+        );
+    } else {
+        reply.append(
+                "\n🛒 Sản phẩm có sẵn trong siêu thị:"
+        );
+    }
+
+    Map<String, Object> response = new LinkedHashMap<>();
+
+    response.put("success", true);
+    response.put("type", "recipe");
+    response.put("reply", reply.toString());
+    response.put("recipeName", recipeName);
+    response.put("servings", servings);
+    response.put("estimatedBudgetVnd", estimatedBudget);
+    response.put("ingredients", availableIngredients);
+
+    return ResponseEntity.ok(response);
+}
+
+/**
+ * Tim san pham gan dung trong database.
+ */
+private List<Product> findMatchingProducts(
+        String ingredientName,
+        List<Product> allProducts) {
+
+    String target = normalizeName(ingredientName);
+
+    if (target.isBlank()) {
+        return List.of();
+    }
+
+    target = target.replace("dau phu", "dau hu");
+
+    List<Product> matches = new ArrayList<>();
+
+    for (Product product : allProducts) {
+
+        if (product == null || product.getName() == null) {
+            continue;
+        }
+
+        String productName = normalizeName(product.getName());
+
+        if (productName.isBlank()) {
+            continue;
+        }
+
+        boolean exactPhraseMatch =
+                productName.contains(target)
+                || (
+                        target.contains(productName)
+                        && productName.length() >= 6
+                        && productName.split("\\s+").length >= 2
+                );
+
+        boolean tofuMatch =
+                target.startsWith("dau hu")
+                && productName.startsWith("dau hu");
+
+        if (exactPhraseMatch || tofuMatch) {
+            matches.add(product);
+        }
+    }
+
+    return matches;
+}
+
+/**
+ * Chuan hoa ten tieng Viet de tim kiem.
+ */
+private String normalizeName(String value) {
+
+    if (value == null) {
+        return "";
+    }
+
+    String normalized = Normalizer.normalize(
+            value.toLowerCase(Locale.ROOT),
+            Normalizer.Form.NFD
+    );
+
+    return normalized
+            .replaceAll("\\p{M}+", "")
+            .replace('đ', 'd')
+            .replaceAll("[^a-z0-9 ]", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+}
+
+/**
+ * Nhan dien cau hoi goi y mon an.
+ */
+private boolean isRecipeRequest(String message) {
+
+    String normalized = normalizeName(message);
+
+    String[] keywords = {
+            "nau gi",
+            "mon an",
+            "goi y mon",
+            "ngan sach",
+            "lam mon",
+            "che bien",
+            "cong thuc",
+            "mon lau",
+            "lau ga",
+            "lau thai",
+            "ga ran",
+            "thuc don",
+            "an gi",
+            "nguyen lieu"
+    };
+
+    for (String keyword : keywords) {
+        if (normalized.contains(keyword)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Doc va kiem tra JSON Gemini tra ve.
+ */
+private JsonNode parseRecipeJson(String text)
+        throws IOException {
+
+    String json = text == null ? "" : text.trim();
+
+    if (json.startsWith("```")) {
+        json = json.replaceFirst(
+                "^```(?:json)?\\s*",
+                ""
+        );
+
+        json = json.replaceFirst(
+                "\\s*```$",
+                ""
+        ).trim();
+    }
+
+    try {
+        JsonNode recipe = objectMapper.readTree(json);
+
+        if (recipe == null || !recipe.isObject()) {
+            throw new IOException(
+                    "JSON món ăn không phải một đối tượng hợp lệ."
+            );
+        }
+
+        if (!recipe.path("ingredients").isArray()) {
+            throw new IOException(
+                    "JSON không có danh sách ingredients hợp lệ."
+            );
+        }
+
+        return recipe;
+
+    } catch (Exception e) {
+        System.err.println("===== GEMINI RAW RESPONSE =====");
+        System.err.println(text);
+        System.err.println("===== JSON PARSE ERROR =====");
+        e.printStackTrace();
+
+        throw new IOException(
+                "Không đọc được JSON món ăn từ Gemini. "
+                + "Hãy xem chi tiết trong Console.",
+                e
+        );
+    }
+}
+
+}

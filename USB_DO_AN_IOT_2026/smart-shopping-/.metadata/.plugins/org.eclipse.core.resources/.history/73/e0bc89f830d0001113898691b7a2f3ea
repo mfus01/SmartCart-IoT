@@ -1,0 +1,231 @@
+package com.smartcart.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+
+@Service
+public class GeminiService {
+
+    private static final String API_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + "gemini-3.8-flash:generateContent";
+
+    private final String apiKey;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    public GeminiService(
+            @Value("${gemini.api.key}") String apiKey,
+            ObjectMapper objectMapper) {
+
+        this.apiKey = apiKey;
+        this.objectMapper = objectMapper;
+
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
+    }
+
+    /**
+     * Chat thông thường.
+     */
+    public String chat(String message)
+            throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Vui long nhap noi dung cau hoi."
+            );
+        }
+
+        return generateContent(message);
+    }
+
+    /**
+     * Goi y mon an theo ngan sach va so nguoi.
+     * Chi tra ve JSON, khong huong dan cach nau.
+     */
+    public String suggestRecipeJson(String message)
+            throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Vui long nhap yeu cau goi y mon an."
+            );
+        }
+
+        String prompt = """
+                Ban la tro ly mua sam thong minh trong sieu thi Viet Nam.
+
+                NHIEM VU:
+                Dua vao yeu cau cua nguoi dung, hay de xuat mon an
+                hoac thuc don phu hop voi so nguoi va ngan sach.
+
+                QUY TAC NGAN SACH:
+                - Doc ngan sach tu yeu cau cua nguoi dung.
+                - Tuyet doi khong co dinh ngan sach o mot muc cu the.
+                - Nguoi dung co the yeu cau 100000, 200000, 500000,
+                  600000 VND hoac bat ky muc ngan sach nao.
+                - Truong estimatedBudgetVnd phai la so nguyen,
+                  khong co dau cham hay ky hieu tien te.
+                - Chi phi la uoc tinh, khong phai gia da xac nhan
+                  tu co so du lieu cua sieu thi.
+                - Co gang khong vuot ngan sach nguoi dung dua ra.
+                - Khong bat buoc phai su dung het ngan sach.
+                - Neu khong co ngan sach, hay uoc tinh chi phi hop ly.
+
+                QUY TAC KHAU PHAN:
+                - Doc so nguoi an tu yeu cau cua nguoi dung.
+                - Truong servings phai phan anh dung so nguoi.
+                - Dieu chinh so luong nguyen lieu theo so nguoi.
+                - Neu nguoi dung khong noi so nguoi, mac dinh la 2.
+
+                QUY TAC NGUYEN LIEU:
+                - Liet ke nguyen lieu can thiet va dinh luong cu the.
+                - Vi du: 500 g, 2 qua, 1 goi.
+                - Ten nguyen lieu phai ngan gon, de tim kiem trong
+                  danh sach san pham sieu thi.
+                - Khong tu khang dinh nguyen lieu co san trong sieu thi.
+                - Khong tu tao ma san pham, gia san pham hoac ID san pham.
+                - He thong khac se doi chieu nguyen lieu voi database.
+                - Khong viet huong dan che bien.
+                - Khong tao danh sach cac buoc nau an.
+                - Khong viet loi gioi thieu dai dong.
+
+                DINH DANG TRA LOI:
+                - Chi tra ve JSON hop le.
+                - Khong dung Markdown.
+                - Khong them van ban ben ngoai JSON.
+                - Noi dung ten mon an va nguyen lieu bang tieng Viet.
+                - Khong sao chep so nguoi hoac ngan sach vi du
+                  neu chung khong khop voi yeu cau thuc te.
+
+                Cau truc JSON bat buoc:
+
+                {
+                  "recipeName": "Ten mon an",
+                  "servings": 0,
+                  "estimatedBudgetVnd": 0,
+                  "ingredients": [
+                    {
+                      "name": "Ten nguyen lieu",
+                      "quantity": "Dinh luong"
+                    }
+                  ]
+                }
+
+                GIAI THICH:
+                - So 0 trong cau truc tren chi la gia tri mau.
+                - Hay thay bang so nguoi va ngan sach phu hop
+                  voi yeu cau thuc te.
+                - Neu nguoi dung dua ra ngan sach, estimatedBudgetVnd
+                  phai la tong chi phi nguyen lieu uoc tinh cho mon an.
+                - Mang ingredients phai chua cac nguyen lieu cu the.
+
+                YEU CAU CUA NGUOI DUNG:
+                """ + message;
+
+        return generateContent(prompt);
+    }
+
+    /**
+     * Gui yeu cau den Gemini API.
+     */
+    private String generateContent(String prompt)
+            throws IOException, InterruptedException {
+
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "Chua cau hinh GEMINI_API_KEY. "
+                    + "Hay kiem tra bien moi truong va khoi dong lai Eclipse."
+            );
+        }
+
+        ObjectNode requestBody = objectMapper.createObjectNode();
+
+        ArrayNode contents = requestBody.putArray("contents");
+
+        ObjectNode content = contents.addObject();
+
+        ArrayNode parts = content.putArray("parts");
+
+        parts.addObject().put("text", prompt);
+
+        ObjectNode generationConfig =
+                requestBody.putObject("generationConfig");
+
+        generationConfig.put("temperature", 0.2);
+        generationConfig.put("maxOutputTokens", 2048);
+        generationConfig.put("responseMimeType", "application/json");
+
+        String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .timeout(Duration.ofSeconds(180))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() < 200
+                || response.statusCode() >= 300) {
+
+            System.err.println(
+                    "Gemini API HTTP status: "
+                    + response.statusCode()
+            );
+
+            System.err.println(
+                    "Gemini API response: "
+                    + response.body()
+            );
+
+            throw new IOException(
+                    "Gemini API loi HTTP "
+                    + response.statusCode()
+                    + ". Chi tiet: "
+                    + response.body()
+            );
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+
+        JsonNode textNode = root.path("candidates")
+                .path(0)
+                .path("content")
+                .path("parts")
+                .path(0)
+                .path("text");
+
+        if (textNode.isMissingNode() || textNode.isNull()) {
+            System.err.println(
+                    "Gemini response khong co noi dung hop le: "
+                    + response.body()
+            );
+
+            throw new IOException(
+                    "Gemini khong tra ve noi dung hop le."
+            );
+        }
+
+        return textNode.asText();
+    }
+}

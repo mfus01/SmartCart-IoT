@@ -1,0 +1,273 @@
+package com.smartcart.controller;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.smartcart.dto.ApiResponse;
+import com.smartcart.dto.RoutePoint;
+import com.smartcart.dto.RouteProductRequest;
+import com.smartcart.dto.RouteRequest;
+import com.smartcart.dto.RouteResponse;
+
+@RestController
+@RequestMapping("/api")
+public class RouteController {
+
+    /*
+     * Mang luoi loi di theo map.js V4.
+     *
+     * Cac loi di doc nam giua cac cot ke.
+     * Cac loi di ngang nam giua cac hang ke.
+     *
+     * He toa do logic: 0..100.
+     */
+
+    private static final double[] AISLE_X = {
+        13.5, 25.5, 37.5, 49.5, 61.5, 73.5, 85.5
+    };
+
+    private static final double[] AISLE_Y = {
+        12.5, 32.0, 51.0, 70.0, 83.5
+    };
+
+    private static final double ENTRANCE_X = 8.0;
+    private static final double ENTRANCE_Y = 91.0;
+
+    @PostMapping("/generate-route")
+    public ApiResponse<RouteResponse> generateRoute(
+            @RequestBody RouteRequest request) {
+
+        if (request == null) {
+            return error("Du lieu yeu cau khong hop le");
+        }
+
+        if (request.getStartPoint() == null) {
+            return error("Thieu diem bat dau");
+        }
+
+        if (request.getProducts() == null
+                || request.getProducts().isEmpty()) {
+            return error("Danh sach san pham rong");
+        }
+
+        List<RoutePoint> routePoints = new ArrayList<>();
+
+        double startX = request.getStartPoint().getX();
+        double startY = request.getStartPoint().getY();
+
+        addPoint(routePoints, startX, startY);
+
+        /*
+         * Neu diem bat dau la cua vao, ket noi den loi di chinh.
+         * Cac diem sau do duoc noi theo mang luoi loi di.
+         */
+        addPoint(routePoints, startX, AISLE_Y[4]);
+
+        double currentX = startX;
+        double currentY = AISLE_Y[4];
+
+        int validProducts = 0;
+
+        for (RouteProductRequest product : request.getProducts()) {
+
+            if (product == null) {
+                continue;
+            }
+
+            String shelfId = product.getShelfId();
+
+            double[] accessPoint = getShelfAccessPoint(shelfId);
+
+            if (accessPoint == null) {
+                // Khong tu dong dung toa do khong hop le.
+                continue;
+            }
+
+            double targetX = accessPoint[0];
+            double targetY = accessPoint[1];
+
+            /*
+             * Di tu vi tri hien tai den loi di gan nhat.
+             */
+            List<RoutePoint> segment = findGridRoute(
+                    currentX,
+                    currentY,
+                    targetX,
+                    targetY
+            );
+
+            if (segment.isEmpty()) {
+                continue;
+            }
+
+            for (RoutePoint point : segment) {
+                addPoint(
+                        routePoints,
+                        point.getX(),
+                        point.getY()
+                );
+            }
+
+            validProducts++;
+
+            /*
+             * Sau khi den diem lay hang, vi tri tiep tuc
+             * duoc quy ve diem tiep can cua ke.
+             */
+            currentX = targetX;
+            currentY = targetY;
+        }
+
+        if (validProducts == 0) {
+            return error(
+                    "Khong tim thay diem tiep can hop le cho cac san pham"
+            );
+        }
+
+        /*
+         * Dung tai diem lay san pham cuoi cung.
+         * KHONG tu dong di den quay thanh toan.
+         */
+        RouteResponse response = new RouteResponse(routePoints);
+
+        return new ApiResponse<>(
+                true,
+                "Tao lo trinh lay hang thanh cong",
+                response
+        );
+    }
+
+    private ApiResponse<RouteResponse> error(String message) {
+        return new ApiResponse<>(
+                false,
+                message,
+                null
+        );
+    }
+
+    /*
+     * Tra ve diem tiep can theo ma ke.
+     *
+     * A1: x=7.5, y=30
+     * H1: x=91.5, y=30
+     * A2: x=7.5, y=49
+     * H3: x=91.5, y=68
+     */
+    private double[] getShelfAccessPoint(String shelfId) {
+
+        if (shelfId == null) {
+            return null;
+        }
+
+        String id = shelfId.trim().toUpperCase();
+
+        if (!id.matches("[A-H][1-3]")) {
+            return null;
+        }
+
+        int column = id.charAt(0) - 'A';
+        int row = Character.getNumericValue(
+                id.charAt(1)
+        ) - 1;
+
+        double shelfX = 4.0 + column * 12.0;
+        double shelfY = new double[] {
+            30.0, 49.0, 68.0
+        }[row];
+
+        return new double[] {
+            shelfX + 3.5,
+            shelfY
+        };
+    }
+
+    /*
+     * Tao doan duong tren mang luoi loi di.
+     *
+     * Day la phien ban co ban, chua phai A*.
+     * Cac diem trung gian duoc noi theo truc ngang/doc.
+     */
+    private List<RoutePoint> findGridRoute(
+            double startX,
+            double startY,
+            double targetX,
+            double targetY) {
+
+        List<RoutePoint> points = new ArrayList<>();
+
+        addPoint(points, startX, startY);
+
+        double verticalX = nearestAisleX(targetX);
+        double horizontalY = nearestAisleY(targetY);
+
+        /*
+         * Di den loi di ngang gan diem dich.
+         */
+        addPoint(points, startX, horizontalY);
+        addPoint(points, verticalX, horizontalY);
+        addPoint(points, targetX, horizontalY);
+        addPoint(points, targetX, targetY);
+
+        return points;
+    }
+
+    private double nearestAisleX(double x) {
+
+        double nearest = AISLE_X[0];
+        double minDistance = Math.abs(x - nearest);
+
+        for (double aisle : AISLE_X) {
+            double distance = Math.abs(x - aisle);
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearest = aisle;
+            }
+        }
+
+        return nearest;
+    }
+
+    private double nearestAisleY(double y) {
+
+        double nearest = AISLE_Y[0];
+        double minDistance = Math.abs(y - nearest);
+
+        for (double aisle : AISLE_Y) {
+            double distance = Math.abs(y - aisle);
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearest = aisle;
+            }
+        }
+
+        return nearest;
+    }
+
+    private void addPoint(
+            List<RoutePoint> points,
+            double x,
+            double y) {
+
+        if (!points.isEmpty()) {
+
+            RoutePoint last = points.get(points.size() - 1);
+
+            if (Math.abs(last.getX() - x) < 0.001
+                    && Math.abs(last.getY() - y) < 0.001) {
+                return;
+            }
+        }
+
+        points.add(
+                new RoutePoint((int) Math.round(x),
+                               (int) Math.round(y))
+        );
+    }
+}

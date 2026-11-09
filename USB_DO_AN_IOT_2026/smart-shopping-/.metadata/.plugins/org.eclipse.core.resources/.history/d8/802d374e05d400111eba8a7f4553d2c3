@@ -1,0 +1,181 @@
+// ======================================================
+// ROUTE MODULE
+// Tao lo trinh va ve route Backend tra ve
+// ======================================================
+
+import {
+    getCart
+} from "../cart/cart.js";
+
+import {
+    drawSupermarketMap,
+    drawRoute
+} from "../map/map.js";
+
+import {
+    generateRouteApi
+} from "../api/routeApi.js";
+
+
+// ======================================================
+// DIEM BAT DAU
+// ======================================================
+
+const START_POINT = {
+    x: 10,
+    y: 90
+};
+
+
+// ======================================================
+// TAO PAYLOAD
+// ======================================================
+
+function createRouteRequest(cart) {
+
+    const products =
+        cart.map(item => {
+
+            return {
+
+                productId: item.id,
+
+                name: item.name,
+
+                shelfId: item.shelfId,
+
+                xCoord: item.xCoord,
+
+                yCoord: item.yCoord,
+
+                qrCode: item.qrCode,
+
+                quantity: item.quantity
+            };
+        });
+
+    return {
+
+        startPoint: {
+            x: START_POINT.x,
+            y: START_POINT.y
+        },
+
+        products: products
+    };
+}
+
+
+// ======================================================
+// TAO LO TRINH
+// ======================================================
+
+async function generateRoute() {
+
+    const cart =
+        getCart();
+
+    if (cart.length === 0) {
+
+        alert(
+            "Gio hang dang rong."
+        );
+
+        return;
+    }
+
+    const routeRequest =
+        createRouteRequest(cart);
+
+    console.log(
+        "Payload gui Backend:",
+        routeRequest
+    );
+
+    try {
+
+        const result =
+            await generateRouteApi(
+                routeRequest
+            );
+
+        console.log(
+            "Backend tra ve:",
+            result
+        );
+
+        if (!result.success) {
+
+            alert(
+                result.message
+                || "Tao lo trinh that bai."
+            );
+
+            return;
+        }
+
+        if (
+            !result.data
+            || !result.data.routePoints
+            || result.data.routePoints.length < 2
+        ) {
+
+            alert(
+                "Backend khong tra ve lo trinh hop le."
+            );
+
+            return;
+        }
+
+        console.log(
+            "Route points:",
+            result.data.routePoints
+        );
+
+        // Ve lai map goc
+        drawSupermarketMap();
+
+        // Ve route Backend tra ve
+        drawRoute(
+            result.data.routePoints
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Loi khi tao lo trinh:",
+            error
+        );
+
+        alert(
+            "Khong the ket noi Backend."
+        );
+    }
+}
+
+
+// ======================================================
+// INIT ROUTE
+// ======================================================
+
+export function initRoute() {
+
+    const generateRouteButton =
+        document.getElementById(
+            "generateRouteButton"
+        );
+
+    if (!generateRouteButton) {
+
+        console.error(
+            "Khong tim thay generateRouteButton."
+        );
+
+        return;
+    }
+
+    generateRouteButton.addEventListener(
+        "click",
+        generateRoute
+    );
+}

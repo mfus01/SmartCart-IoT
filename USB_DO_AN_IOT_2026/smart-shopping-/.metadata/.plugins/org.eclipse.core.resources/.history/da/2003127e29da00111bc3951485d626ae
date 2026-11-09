@@ -1,0 +1,95 @@
+package com.smartcart.controller;
+
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/rfid")
+public class RfidPositionController {
+
+    // Vi tri ban dau cua xe
+    private final AtomicReference<Position> currentPosition =
+        new AtomicReference<>(
+            new Position(17, 111, "CUA_VAO")
+        );
+
+    // Danh sach the RFID va toa do
+    // Tam thoi gan the dau tien cho K1 de test
+    private static final Map<String, Position> RFID_MAP =
+        Map.of(
+            "318D4B6E",
+            new Position(25, 30, "K1")
+        );
+
+    public record Position(
+        int x,
+        int y,
+        String location
+    ) {}
+
+    public record ScanRequest(
+        String uid
+    ) {}
+
+    // =========================================
+    // ESP32 GUI UID VE BACKEND
+    // =========================================
+
+    @PostMapping("/scan")
+    public ResponseEntity<?> scan(
+            @RequestBody ScanRequest request) {
+
+        if (request == null || request.uid() == null) {
+
+            return ResponseEntity.badRequest().body(
+                Map.of("error", "Thieu UID")
+            );
+        }
+
+        String uid = request.uid()
+            .trim()
+            .toUpperCase();
+
+        Position position = RFID_MAP.get(uid);
+
+        if (position == null) {
+
+            return ResponseEntity.status(404).body(
+                Map.of(
+                    "success", false,
+                    "message", "The RFID chua duoc dang ky"
+                )
+            );
+        }
+
+        currentPosition.set(position);
+
+        System.out.println(
+            "[RFID] UID: " + uid
+            + " | Vi tri: " + position.location()
+        );
+
+        return ResponseEntity.ok(
+            Map.of(
+                "success", true,
+                "uid", uid,
+                "x", position.x(),
+                "y", position.y(),
+                "location", position.location()
+            )
+        );
+    }
+
+    // =========================================
+    // WEBSITE LAY VI TRI XE
+    // =========================================
+
+    @GetMapping("/position")
+    public Position getPosition() {
+
+        return currentPosition.get();
+    }
+}

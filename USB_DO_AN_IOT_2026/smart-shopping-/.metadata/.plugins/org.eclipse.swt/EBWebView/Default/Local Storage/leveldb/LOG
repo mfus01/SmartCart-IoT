@@ -1,0 +1,4 @@
+2026/11/10-02:05:04.263 5b20 Reusing MANIFEST D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/MANIFEST-000001
+2026/11/10-02:05:04.362 5b20 Recovering log #3
+2026/11/10-02:05:04.367 5b20 (ignoring error) D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/000003.log: dropping 52 bytes; Corruption: checksum mismatch
+2026/11/10-02:05:04.412 5b20 Reusing old log D:\USB_DO_AN_IOT_2026\smart-shopping-\.metadata\.plugins\org.eclipse.swt\EBWebView\Default\Local Storage\leveldb/000003.log 

@@ -1,0 +1,202 @@
+package com.smartcart.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+
+@Service
+public class GeminiService {
+
+	private static final String API_URL =
+			"https://generativelanguage.googleapis.com/v1beta/models/"
+			+ "gemini-3.8-flash";
+
+    private final String apiKey;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    public GeminiService(
+            @Value("${gemini.api.key}") String apiKey,
+            ObjectMapper objectMapper) {
+
+        this.apiKey = apiKey;
+        this.objectMapper = objectMapper;
+
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
+    }
+
+    /**
+     * Chat thông thường.
+     */
+    public String chat(String message)
+            throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Vui long nhap noi dung cau hoi."
+            );
+        }
+
+        return generateContent(message);
+    }
+
+    /**
+     * Yêu cầu Gemini gợi ý món ăn theo ngân sách,
+     * số người và trả kết quả dưới dạng JSON.
+     */
+    public String suggestRecipeJson(String message)
+            throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Vui long nhap yeu cau goi y mon an."
+            );
+        }
+
+        String prompt = """
+                Bạn là trợ lý mua sắm thông minh trong siêu thị Việt Nam.
+
+                Nhiệm vụ:
+                1. Đọc yêu cầu của người dùng.
+                2. Gợi ý một món ăn hoặc một thực đơn phù hợp.
+                3. Tính nguyên liệu và định lượng phù hợp với số người.
+                4. Ước lượng chi phí bằng đồng Việt Nam.
+                5. Hướng dẫn cách chế biến theo từng bước.
+                6. Ưu tiên món ăn dễ thực hiện và nguyên liệu dễ mua tại Việt Nam.
+
+                QUY TẮC:
+                - Nếu người dùng cung cấp ngân sách, cố gắng không vượt ngân sách.
+                - Phải liệt kê từng nguyên liệu riêng biệt.
+                - Định lượng phải cụ thể, ví dụ 500 g, 2 quả, 1 gói.
+                - Không được chỉ viết tên món ăn mà bỏ qua nguyên liệu.
+                - Không được khẳng định giá chính xác nếu chưa có dữ liệu giá thực tế.
+                - estimatedBudgetVnd là giá ước lượng, không phải giá được xác nhận từ database.
+                - Chỉ trả về JSON hợp lệ, không dùng Markdown hoặc dấu ``` bao quanh.
+                - Nội dung trả lời bằng tiếng Việt.
+
+                Trả về đúng cấu trúc JSON sau:
+                {
+                  "recipeName": "Tên món ăn",
+                  "servings": 3,
+                  "estimatedBudgetVnd": 200000,
+                  "description": "Mô tả món ăn",
+                  "ingredients": [
+                    {
+                      "name": "Thịt gà",
+                      "quantity": "500 g"
+                    },
+                    {
+                      "name": "Nấm kim châm",
+                      "quantity": "2 gói"
+                    }
+                  ],
+                  "steps": [
+                    "Bước 1...",
+                    "Bước 2..."
+                  ]
+                }
+
+                Yêu cầu của người dùng:
+                """ + message;
+
+        return generateContent(prompt);
+    }
+
+    /**
+     * Gửi yêu cầu đến Gemini API.
+     */
+    private String generateContent(String prompt)
+            throws IOException, InterruptedException {
+
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "Chua cau hinh GEMINI_API_KEY. "
+                    + "Hay kiem tra bien moi truong va khoi dong lai Eclipse."
+            );
+        }
+
+        ObjectNode requestBody = objectMapper.createObjectNode();
+
+        ArrayNode contents = requestBody.putArray("contents");
+
+        ObjectNode content = contents.addObject();
+
+        ArrayNode parts = content.putArray("parts");
+
+        parts.addObject().put("text", prompt);
+
+        ObjectNode generationConfig =
+                requestBody.putObject("generationConfig");
+
+        generationConfig.put("temperature", 0.4);
+        generationConfig.put("maxOutputTokens", 2048);
+
+        String jsonBody =
+                objectMapper.writeValueAsString(requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .timeout(Duration.ofSeconds(180))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() < 200
+                || response.statusCode() >= 300) {
+
+            System.err.println(
+                    "Gemini API HTTP status: "
+                    + response.statusCode()
+            );
+
+            System.err.println(
+                    "Gemini API response: "
+                    + response.body()
+            );
+
+            throw new IOException(
+                    "Gemini API loi HTTP "
+                    + response.statusCode()
+                    + ". Chi tiet: "
+                    + response.body()
+            );
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+
+        JsonNode textNode = root.path("candidates")
+                .path(0)
+                .path("content")
+                .path("parts")
+                .path(0)
+                .path("text");
+
+        if (textNode.isMissingNode() || textNode.isNull()) {
+            throw new IOException(
+                    "Gemini khong tra ve noi dung. "
+                    + "Hay kiem tra response trong Console."
+            );
+        }
+
+        return textNode.asText();
+    }
+}

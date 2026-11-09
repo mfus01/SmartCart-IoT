@@ -1,0 +1,553 @@
+import { searchProducts } from "../api/productApi.js";
+import { highlightProductOnMap } from "../map/map.js";
+import { addToCart } from "../cart/cart.js";
+
+// ======================================================
+// DOM
+// ======================================================
+
+const chatInput = document.getElementById("chatInput");
+const sendButton = document.getElementById("sendButton");
+const chatMessages = document.getElementById("chatMessages");
+
+let isSending = false;
+
+// ======================================================
+// CHUAN HOA TIENG VIET
+// ======================================================
+
+function normalizeText(message) {
+    return String(message ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/Đ/g, "D")
+        .toLowerCase()
+        .trim();
+}
+
+// ======================================================
+// TACH TU KHOA SAN PHAM
+// Vi du: "ca rot o dau" -> "ca rot"
+// ======================================================
+
+function extractProductKeyword(message) {
+    let keyword = normalizeText(message)
+        .replace(/[?!.,;:]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const phrasesToRemove = [
+        "cho toi biet",
+        "cho minh biet",
+        "giup toi tim",
+        "giup minh tim",
+        "tim kiem san pham",
+        "tim san pham",
+        "toi muon mua",
+        "minh muon mua",
+        "toi can mua",
+        "minh can mua",
+        "nam o dau",
+        "o dau",
+        "nam o ke nao",
+        "ke nao",
+        "vi tri",
+        "bao nhieu tien",
+        "gia bao nhieu",
+        "toi muon",
+        "minh muon",
+        "toi can",
+        "minh can",
+        "hay tim",
+        "tim kiem",
+        "san pham",
+        "mua",
+        "tim",
+        "gia"
+    ];
+
+    phrasesToRemove.sort((a, b) => b.length - a.length);
+
+    for (const phrase of phrasesToRemove) {
+        const escapedPhrase = phrase.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            "\\$&"
+        );
+
+        keyword = keyword.replace(
+            new RegExp("\\b" + escapedPhrase + "\\b", "g"),
+            " "
+        );
+    }
+
+    return keyword.replace(/\s+/g, " ").trim();
+}
+
+// ======================================================
+// NHAN DIEN CAU HOI HOI THOAI THONG THUONG
+// ======================================================
+
+function isGeneralConversation(message) {
+    const text = normalizeText(message);
+
+    const patterns = [
+        /^xin chao\b/,
+        /^chao\b/,
+        /^hello\b/,
+        /^hi\b/,
+        /\bban la ai\b/,
+        /\bban co the giup gi\b/,
+        /\bban giup duoc gi\b/,
+        /\bban lam duoc gi\b/,
+        /\bgioi thieu\b/,
+        /\bcam on\b/,
+        /\bthank you\b/,
+        /\btam biet\b/,
+        /\bhen gap lai\b/,
+        /\bhom nay ban the nao\b/,
+        /\bban the nao\b/
+    ];
+
+    return patterns.some(pattern => pattern.test(text));
+}
+
+// ======================================================
+// NHAN DIEN Y DINH HOI VI TRI VA GIA
+// ======================================================
+
+function isLocationQuestion(message) {
+    const text = normalizeText(message);
+
+    return (
+        /\bo dau\b/.test(text) ||
+        /\bnam o dau\b/.test(text) ||
+        /\bvi tri\b/.test(text) ||
+        /\bke nao\b/.test(text) ||
+        /\bke so may\b/.test(text)
+    );
+}
+
+function isPriceQuestion(message) {
+    const text = normalizeText(message);
+
+    return (
+        /\bgia\b/.test(text) ||
+        /\bbao nhieu tien\b/.test(text) ||
+        /\bgia bao nhieu\b/.test(text) ||
+        /\bhet bao nhieu\b/.test(text)
+    );
+}
+
+function isProductIntent(message) {
+    const text = normalizeText(message);
+
+    const patterns = [
+        /\bo dau\b/,
+        /\bnam o dau\b/,
+        /\bvi tri\b/,
+        /\bke nao\b/,
+        /\btim\b/,
+        /\bmua\b/,
+        /\bgia\b/,
+        /\bbao nhieu\b/,
+        /\bsan pham\b/,
+        /\bcon hang\b/,
+        /\bton kho\b/,
+        /\bco .* khong\b/
+    ];
+
+    return patterns.some(pattern => pattern.test(text));
+}
+
+// ======================================================
+// THEM TIN NHAN CHAT
+// ======================================================
+
+function addChatMessage(message, type) {
+    if (!chatMessages) {
+        console.error("Khong tim thay phan tu chatMessages.");
+        return null;
+    }
+
+    const element = document.createElement("p");
+
+    element.textContent = message;
+    element.classList.add("chat-message");
+
+    if (type === "user") {
+        element.style.background = "#1565c0";
+        element.style.color = "white";
+    } else {
+        element.style.background = "#e3f2fd";
+        element.style.color = "#222";
+    }
+
+    element.style.padding = "12px";
+    element.style.borderRadius = "8px";
+    element.style.marginBottom = "10px";
+    element.style.whiteSpace = "pre-wrap";
+
+    chatMessages.appendChild(element);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    return element;
+}
+
+// ======================================================
+// XOA KET QUA TIM KIEM CU
+// ======================================================
+
+function clearPreviousSearchResults() {
+    if (!chatMessages) {
+        return;
+    }
+
+    chatMessages
+        .querySelectorAll(".product-result")
+        .forEach(element => element.remove());
+}
+
+// ======================================================
+// HIEN THI SAN PHAM
+// ======================================================
+
+function addProductResultMessage(product) {
+    const container = document.createElement("div");
+
+    container.classList.add("product-result");
+
+    container.style.background = "#e3f2fd";
+    container.style.color = "#222";
+    container.style.padding = "12px";
+    container.style.marginBottom = "10px";
+    container.style.borderRadius = "8px";
+
+    const textElement = document.createElement("div");
+
+    const price = Number(product.price);
+
+    const formattedPrice = Number.isFinite(price)
+        ? price.toLocaleString("vi-VN")
+        : "Chua co gia";
+
+    textElement.textContent =
+        "Tim thay: " +
+        product.name +
+        " | Gia: " +
+        formattedPrice +
+        " VND | Ke " +
+        (product.shelfId ?? "Chua xac dinh") +
+        " | Toa do: (" +
+        (product.xCoord ?? "?") +
+        ", " +
+        (product.yCoord ?? "?") +
+        ")";
+
+    const addButton = document.createElement("button");
+
+    addButton.textContent = "Them vao gio";
+
+    addButton.style.marginTop = "10px";
+    addButton.style.padding = "8px 12px";
+    addButton.style.border = "none";
+    addButton.style.borderRadius = "6px";
+    addButton.style.background = "#2e7d32";
+    addButton.style.color = "white";
+    addButton.style.cursor = "pointer";
+
+    addButton.addEventListener("click", function () {
+        try {
+            addToCart(product);
+
+            addChatMessage(
+                "Da them " + product.name + " vao gio hang.",
+                "bot"
+            );
+        } catch (error) {
+            console.error("Loi them san pham vao gio:", error);
+
+            addChatMessage(
+                "Khong the them san pham vao gio hang.",
+                "bot"
+            );
+        }
+    });
+
+    container.appendChild(textElement);
+    container.appendChild(addButton);
+
+    chatMessages.appendChild(container);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ======================================================
+// TRA LOI VI TRI SAN PHAM TU DU LIEU THUC TE
+// ======================================================
+
+function answerProductLocation(products) {
+    const shelves = [
+        ...new Set(
+            products
+                .map(product => product.shelfId)
+                .filter(Boolean)
+        )
+    ];
+
+    if (shelves.length === 0) {
+        addChatMessage(
+            "Da tim thay san pham, nhung du lieu ke hang chua duoc cap nhat.",
+            "bot"
+        );
+        return;
+    }
+
+    const shelfText = shelves.join(", ");
+
+    addChatMessage(
+        "San pham duoc tim thay tai ke " +
+        shelfText +
+        ". Minh da danh dau san pham tren ban do. Ban co the xem them gia va cac phien ban ben duoi.",
+        "bot"
+    );
+}
+
+// ======================================================
+// TRA LOI GIA SAN PHAM TU DU LIEU THUC TE
+// ======================================================
+
+function answerProductPrice(products) {
+    if (products.length === 1) {
+        const product = products[0];
+        const price = Number(product.price);
+
+        addChatMessage(
+            "Gia cua " +
+            product.name +
+            " la " +
+            (Number.isFinite(price)
+                ? price.toLocaleString("vi-VN") + " VND"
+                : "chua duoc cap nhat") +
+            ".",
+            "bot"
+        );
+
+        return;
+    }
+
+    addChatMessage(
+        "Minh tim thay " +
+        products.length +
+        " phien ban san pham phu hop. Gia tung phien ban duoc hien thi ben duoi.",
+        "bot"
+    );
+}
+
+// ======================================================
+// GOI GEMINI
+// Backend: POST /api/chat/gemini
+// ======================================================
+
+async function askGemini(message) {
+    const loadingMessage = addChatMessage(
+        "Gemini dang suy nghi, vui long cho...",
+        "bot"
+    );
+
+    try {
+        const response = await fetch("/api/chat/gemini", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                message: message
+            })
+        });
+
+        let result;
+
+        try {
+            result = await response.json();
+        } catch {
+            throw new Error("Backend khong tra ve JSON hop le.");
+        }
+
+        if (!response.ok || !result.success) {
+            throw new Error(
+                result.message || "Gemini chua the tra loi."
+            );
+        }
+
+        if (loadingMessage) {
+            loadingMessage.remove();
+        }
+
+        addChatMessage(result.reply, "bot");
+
+    } catch (error) {
+        console.error("Loi goi Gemini:", error);
+
+        if (loadingMessage) {
+            loadingMessage.remove();
+        }
+
+        addChatMessage(
+            "Khong the nhan cau tra loi tu Gemini: " +
+            (error.message || "Loi ket noi."),
+            "bot"
+        );
+    }
+}
+
+// ======================================================
+// TIM SAN PHAM TRONG SQLITE
+// ======================================================
+
+async function handleSearchProduct(message) {
+    clearPreviousSearchResults();
+
+    const searchKeyword = extractProductKeyword(message) || message;
+
+    console.log("Cau nguoi dung:", message);
+    console.log("Tu khoa tim kiem:", searchKeyword);
+
+    try {
+        const result = await searchProducts(searchKeyword);
+
+        if (!result || !result.success) {
+            addChatMessage(
+                result?.message || "Khong the tim kiem san pham.",
+                "bot"
+            );
+            return;
+        }
+
+        const products = Array.isArray(result.data)
+            ? result.data
+            : [];
+
+        // Khong tim thay san pham:
+        // Neu cau hoi co y dinh tim san pham, thong bao ro rang.
+        // Neu la cau hoi mo, chuyen sang Gemini.
+        if (products.length === 0) {
+            if (isProductIntent(message)) {
+                addChatMessage(
+                    "Khong tim thay san pham phu hop voi tu khoa: " +
+                    searchKeyword +
+                    ". Ban thu nhap ten san pham ngan gon hon nhe.",
+                    "bot"
+                );
+            } else {
+                await askGemini(message);
+            }
+
+            return;
+        }
+
+        // Danh dau san pham dau tien tren ban do
+        highlightProductOnMap(products[0]);
+
+        // Tra loi bang du lieu that neu hoi vi tri
+        if (isLocationQuestion(message)) {
+            answerProductLocation(products);
+        } else if (isPriceQuestion(message)) {
+            answerProductPrice(products);
+        } else {
+            addChatMessage(
+                "Minh tim thay " +
+                products.length +
+                " ket qua phu hop voi yeu cau cua ban.",
+                "bot"
+            );
+        }
+
+        // Hien thi cac san pham va nut them vao gio
+        products.forEach(product => {
+            addProductResultMessage(product);
+        });
+
+    } catch (error) {
+        console.error("Loi tim san pham:", error);
+
+        addChatMessage(
+            "Khong the ket noi den Backend de tim san pham.",
+            "bot"
+        );
+    }
+}
+
+// ======================================================
+// XU LY TIN NHAN
+// ======================================================
+
+async function handleSendMessage() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error("Thieu thanh phan giao dien chat.");
+        return;
+    }
+
+    if (isSending) {
+        return;
+    }
+
+    const message = chatInput.value.trim();
+
+    if (!message) {
+        return;
+    }
+
+    addChatMessage(message, "user");
+
+    chatInput.value = "";
+
+    isSending = true;
+    sendButton.disabled = true;
+
+    try {
+        // Cac cau giao tiep thong thuong gui thang cho Gemini
+        if (isGeneralConversation(message)) {
+            clearPreviousSearchResults();
+            await askGemini(message);
+        } else {
+            // Cac cau con lai thu tim san pham truoc
+            await handleSearchProduct(message);
+        }
+    } finally {
+        isSending = false;
+        sendButton.disabled = false;
+        chatInput.focus();
+    }
+}
+
+// ======================================================
+// SU KIEN NHAP LIEU
+// ======================================================
+
+function handleInputKeydown(event) {
+    if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        handleSendMessage();
+    }
+}
+
+// ======================================================
+// KHOI DONG CHAT
+// ======================================================
+
+export function initChat() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error(
+            "Khong the khoi dong chat: thieu phan tu HTML."
+        );
+        return;
+    }
+
+    sendButton.removeEventListener("click", handleSendMessage);
+    sendButton.addEventListener("click", handleSendMessage);
+
+    chatInput.removeEventListener("keydown", handleInputKeydown);
+    chatInput.addEventListener("keydown", handleInputKeydown);
+
+    console.log("Chat module da khoi dong.");
+}

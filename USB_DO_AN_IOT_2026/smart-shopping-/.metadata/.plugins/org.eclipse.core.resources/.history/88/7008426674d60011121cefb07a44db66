@@ -1,0 +1,75 @@
+// ========================================
+// KET NOI ESP32 - GIAO DIEN THU GON
+// ========================================
+
+const ESP32_URL = "http://192.168.88.206/status";
+
+const esp32Panel = document.createElement("div");
+
+esp32Panel.id = "esp32Panel";
+
+// Giao dien nho gon
+esp32Panel.style.cssText = `
+    position: fixed;
+    top: 115px;
+    right: 25px;
+    bottom: auto;
+    background: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 9999;
+    font-family: Arial;
+    font-size: 14px;
+    font-weight: bold;
+    white-space: nowrap;
+    max-width: calc(100vw - 50px);
+`;
+
+esp32Panel.textContent = "ESP32 dang ket noi...";
+
+document.body.appendChild(esp32Panel);
+
+// ========================================
+// DOC DU LIEU ESP32
+// ========================================
+
+async function updateESP32() {
+
+    try {
+
+        const response = await fetch(
+            ESP32_URL,
+            { cache: "no-store" }
+        );
+
+        if (!response.ok) {
+            throw new Error("ESP32 khong phan hoi");
+        }
+
+        const data = await response.json();
+
+        const angle = Number(data.angle);
+
+        if (!Number.isFinite(angle) || angle < 0) {
+            throw new Error("Goc cam bien khong hop le");
+        }
+
+        esp32Panel.textContent =
+            "🛒 ESP32: ✅ | AS5600: "
+            + angle.toFixed(2)
+            + "°";
+
+    } catch (error) {
+
+        esp32Panel.textContent =
+            "🔴 ESP32: Mat ket noi";
+
+        console.error(error);
+    }
+}
+
+// Cap nhat moi giay
+updateESP32();
+
+setInterval(updateESP32, 1000);

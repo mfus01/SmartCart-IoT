@@ -1,0 +1,291 @@
+package com.smartcart.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+
+@Service
+public class GeminiService {
+
+private static final String API_URL =
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        + "gemini-3.8-flash:generateContent";
+
+private final String apiKey;
+private final HttpClient httpClient;
+private final ObjectMapper objectMapper;
+
+public GeminiService(
+        @Value("${gemini.api.key}") String apiKey,
+        ObjectMapper objectMapper) {
+
+    this.apiKey = apiKey;
+    this.objectMapper = objectMapper;
+
+    this.httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(20))
+            .build();
+}
+
+/**
+ * Chat thong thuong.
+ */
+public String chat(String message)
+        throws IOException, InterruptedException {
+
+    if (message == null || message.isBlank()) {
+        throw new IllegalArgumentException(
+                "Vui long nhap noi dung cau hoi."
+        );
+    }
+
+    return generateContent(message, false);
+}
+
+/**
+ * Goi y mon an theo ngan sach va so nguoi.
+ * Chi tra ve JSON, khong co huong dan nau an.
+ */
+public String suggestRecipeJson(String message)
+        throws IOException, InterruptedException {
+
+    if (message == null || message.isBlank()) {
+        throw new IllegalArgumentException(
+                "Vui long nhap yeu cau goi y mon an."
+        );
+    }
+
+    String prompt = """
+            Ban la tro ly mua sam thong minh trong sieu thi Viet Nam.
+
+            NHIEM VU:
+            Dua vao yeu cau nguoi dung, de xuat mot mon an
+            hoac thuc don phu hop voi so nguoi va ngan sach.
+
+            QUY TAC:
+            - Doc so nguoi an tu cau hoi.
+            - Neu khong co so nguoi, mac dinh 2 nguoi.
+            - Doc ngan sach tu cau hoi neu nguoi dung co cung cap.
+            - Khong co dinh ngan sach o mot muc cu the.
+            - Co gang khong vuot ngan sach nguoi dung.
+            - Khong bat buoc phai dung het ngan sach.
+            - Chi phi tra ve la uoc tinh, khong phai gia database.
+            - Chi liet ke toi da 8 nguyen lieu.
+            - Ten nguyen lieu phai ngan gon va de tim trong sieu thi.
+            - Moi nguyen lieu phai co dinh luong cu the.
+            - Khong tu khang dinh san pham co san trong sieu thi.
+            - Khong viet mo ta dai dong.
+            - Khong huong dan cach nau.
+            - Khong tra ve cac buoc che bien.
+            - Khong tao ma san pham hoac gia san pham.
+            - Chi tra ve JSON hop le, khong dung Markdown.
+
+            Cau truc JSON bat buoc:
+
+            {
+              "recipeName": "Ten mon an",
+              "servings": 2,
+              "estimatedBudgetVnd": 0,
+              "ingredients": [
+                {
+                  "name": "Ten nguyen lieu",
+                  "quantity": "Dinh luong"
+                }
+              ]
+            }
+
+            Luu y:
+            - Thay so nguoi bang so nguoi thuc te trong cau hoi.
+            - estimatedBudgetVnd la so nguyen duong neu uoc tinh duoc.
+            - Khong sao chep cac gia tri vi du neu khong phu hop.
+            - Khong them description hoac steps.
+            - Dam bao JSON co day du dau ngoac va dau ngoac vuong.
+
+            YEU CAU CUA NGUOI DUNG:
+            """ + message;
+
+    return generateContent(prompt, true);
+}
+
+/**
+ * Goi Gemini API va doc noi dung tra ve.
+ */
+private String generateContent(
+        String prompt,
+        boolean recipeMode)
+        throws IOException, InterruptedException {
+
+    if (apiKey == null || apiKey.isBlank()) {
+        throw new IllegalStateException(
+                "Chua cau hinh GEMINI_API_KEY. "
+                + "Hay kiem tra bien moi truong va khoi dong lai Eclipse."
+        );
+    }
+
+    ObjectNode requestBody = objectMapper.createObjectNode();
+
+    ArrayNode contents = requestBody.putArray("contents");
+
+    ObjectNode content = contents.addObject();
+
+    ArrayNode parts = content.putArray("parts");
+
+    parts.addObject().put("text", prompt);
+
+    ObjectNode generationConfig =
+            requestBody.putObject("generationConfig");
+
+    generationConfig.put("temperature", recipeMode ? 0.2 : 0.5);
+
+    // JSON cong thuc can du token de khong bi cat giua chung.
+    generationConfig.put(
+            "maxOutputTokens",
+            recipeMode ? 2048 : 1024
+    );
+
+    if (recipeMode) {
+        generationConfig.put(
+                "responseMimeType",
+                "application/json"
+        );
+    }
+
+    String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+    HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(API_URL))
+            .timeout(Duration.ofSeconds(120))
+            .header("Content-Type", "application/json")
+            .header("x-goog-api-key", apiKey)
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build();
+
+    HttpResponse<String> response = httpClient.send(
+            request,
+            HttpResponse.BodyHandlers.ofString()
+    );
+
+    if (response.statusCode() < 200
+            || response.statusCode() >= 300) {
+
+        System.err.println(
+                "Gemini API HTTP status: "
+                + response.statusCode()
+        );
+
+        System.err.println(
+                "Gemini API response: "
+                + response.body()
+        );
+
+        throw new IOException(
+                "Gemini API loi HTTP "
+                + response.statusCode()
+                + ". Chi tiet: "
+                + response.body()
+        );
+    }
+
+    JsonNode root = objectMapper.readTree(response.body());
+
+    JsonNode candidate = root.path("candidates").path(0);
+
+    if (candidate.isMissingNode() || candidate.isNull()) {
+        System.err.println("Gemini response: " + response.body());
+
+        throw new IOException(
+                "Gemini khong tra ve candidate hop le."
+        );
+    }
+
+    String finishReason =
+            candidate.path("finishReason").asText("");
+
+    JsonNode partsNode =
+            candidate.path("content").path("parts");
+
+    StringBuilder generatedText = new StringBuilder();
+
+    if (partsNode.isArray()) {
+        for (JsonNode part : partsNode) {
+            JsonNode textPart = part.path("text");
+
+            if (!textPart.isMissingNode()
+                    && !textPart.isNull()) {
+
+                generatedText.append(textPart.asText());
+            }
+        }
+    }
+
+    String result = generatedText.toString().trim();
+
+    System.out.println(
+            "Gemini finishReason: " + finishReason
+    );
+
+    if (result.isEmpty()) {
+        System.err.println(
+                "Gemini response: " + response.body()
+        );
+
+        throw new IOException(
+                "Gemini khong tra ve noi dung hop le."
+        );
+    }
+
+    if ("MAX_TOKENS".equals(finishReason)) {
+        System.err.println(
+                "Gemini response bi cat: " + result
+        );
+
+        throw new IOException(
+                "Gemini da cham gioi han token va cat cau tra loi. "
+                + "Vui long thu lai."
+        );
+    }
+
+    if (recipeMode) {
+        // Kiem tra JSON truoc khi gui ve controller.
+        try {
+            JsonNode parsed = objectMapper.readTree(result);
+
+            if (parsed == null || !parsed.isObject()) {
+                throw new IOException("JSON khong phai object.");
+            }
+
+            if (!parsed.path("ingredients").isArray()) {
+                throw new IOException(
+                        "JSON khong co danh sach ingredients."
+                );
+            }
+
+        } catch (Exception e) {
+            System.err.println("===== GEMINI RAW RESPONSE =====");
+            System.err.println(result);
+            System.err.println("===== JSON VALIDATION ERROR =====");
+            e.printStackTrace();
+
+            throw new IOException(
+                    "Gemini tra ve JSON khong hop le hoac bi thieu. "
+                    + "Hay thu lai.",
+                    e
+            );
+        }
+    }
+
+    return result;
+}
+
+}

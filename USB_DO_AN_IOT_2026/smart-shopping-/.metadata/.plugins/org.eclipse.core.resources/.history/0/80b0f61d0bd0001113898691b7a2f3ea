@@ -1,0 +1,212 @@
+// ======================================================
+// CHAT MODULE
+// Quan ly giao dien tim san pham
+// ======================================================
+
+import { searchProducts } from "../api/productApi.js";
+import { highlightProductOnMap } from "../map/map.js";
+import { addToCart } from "../cart/cart.js";
+
+// ======================================================
+// DOM
+// ======================================================
+
+const chatInput = document.getElementById("chatInput");
+const sendButton = document.getElementById("sendButton");
+const chatMessages = document.getElementById("chatMessages");
+
+// ======================================================
+// THEM TIN NHAN VAO CHAT
+// ======================================================
+
+function addChatMessage(message, type) {
+    const messageElement = document.createElement("p");
+
+    messageElement.textContent = message;
+    messageElement.classList.add("chat-message");
+
+    if (type === "user") {
+        messageElement.style.background = "#1565c0";
+        messageElement.style.color = "white";
+    } else {
+        messageElement.style.background = "#e3f2fd";
+        messageElement.style.color = "#222";
+    }
+
+    messageElement.style.padding = "12px";
+    messageElement.style.borderRadius = "8px";
+    messageElement.style.marginBottom = "10px";
+
+    chatMessages.appendChild(messageElement);
+
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ======================================================
+// XOA CAC KET QUA TIM KIEM SAN PHAM CU
+// Khong xoa tin nhan nguoi dung hoac thong bao gio hang
+// ======================================================
+
+function clearPreviousSearchResults() {
+    const oldResults = chatMessages.querySelectorAll(".product-result");
+
+    oldResults.forEach(result => {
+        result.remove();
+    });
+}
+
+// ======================================================
+// HIEN KET QUA SAN PHAM
+// ======================================================
+
+function addProductResultMessage(product) {
+    const container = document.createElement("div");
+
+    // Danh dau de co the xoa khi tim kiem lan tiep theo
+    container.classList.add("product-result");
+
+    container.style.background = "#e3f2fd";
+    container.style.padding = "12px";
+    container.style.marginBottom = "10px";
+    container.style.borderRadius = "8px";
+
+    // Noi dung san pham
+    const textElement = document.createElement("div");
+
+    textElement.textContent =
+        "Tim thay: " +
+        product.name +
+        " | Gia: " +
+        Number(product.price).toLocaleString("vi-VN") +
+        " VND" +
+        " | Ke " +
+        product.shelfId +
+        " | Toa do: (" +
+        product.xCoord +
+        ", " +
+        product.yCoord +
+        ")";
+
+    // Nut them vao gio
+    const addButton = document.createElement("button");
+
+    addButton.textContent = "Them vao gio";
+
+    addButton.style.marginTop = "10px";
+    addButton.style.padding = "8px 12px";
+    addButton.style.border = "none";
+    addButton.style.borderRadius = "6px";
+    addButton.style.background = "#2e7d32";
+    addButton.style.color = "white";
+    addButton.style.cursor = "pointer";
+
+    addButton.addEventListener("click", function () {
+        addToCart(product);
+
+        addChatMessage(
+            "Da them " + product.name + " vao gio hang.",
+            "bot"
+        );
+    });
+
+    container.appendChild(textElement);
+    container.appendChild(addButton);
+
+    chatMessages.appendChild(container);
+
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ======================================================
+// TIM SAN PHAM
+// ======================================================
+
+async function handleSearchProduct(keyword) {
+    // Xoa ket qua tim kiem cu ngay khi bat dau tim moi
+    clearPreviousSearchResults();
+
+    try {
+        const result = await searchProducts(keyword);
+
+        if (!result.success) {
+            addChatMessage(
+                result.message || "Khong tim thay san pham.",
+                "bot"
+            );
+            return;
+        }
+
+        const products = Array.isArray(result.data)
+            ? result.data
+            : [];
+
+        if (products.length === 0) {
+            addChatMessage(
+                "Khong tim thay san pham phu hop.",
+                "bot"
+            );
+            return;
+        }
+
+        // Highlight san pham dau tien tren ban do
+        highlightProductOnMap(products[0]);
+
+        // Chi hien thi ket qua cua lan tim kiem hien tai
+        products.forEach(product => {
+            addProductResultMessage(product);
+        });
+
+    } catch (error) {
+        console.error("Loi tim san pham:", error);
+
+        addChatMessage(
+            "Khong the ket noi den Backend.",
+            "bot"
+        );
+    }
+}
+
+// ======================================================
+// GUI TIN NHAN
+// ======================================================
+
+async function handleSendMessage() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error("Khong tim thay cac phan tu giao dien chat.");
+        return;
+    }
+
+    const keyword = chatInput.value.trim();
+
+    if (keyword === "") {
+        return;
+    }
+
+    addChatMessage(keyword, "user");
+
+    chatInput.value = "";
+
+    await handleSearchProduct(keyword);
+}
+
+// ======================================================
+// KHOI DONG CHAT
+// ======================================================
+
+export function initChat() {
+    if (!chatInput || !sendButton || !chatMessages) {
+        console.error("Khong the khoi dong chat: thieu phan tu HTML.");
+        return;
+    }
+
+    // Tranh dang ky su kien trung lap
+    sendButton.removeEventListener("click", handleSendMessage);
+    sendButton.addEventListener("click", handleSendMessage);
+
+    chatInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.isComposing) {
+            event.preventDefault();
+            handleSendMessage();
+        }
+    });
+}

@@ -1,0 +1,327 @@
+// ======================================================
+// SMART SHOPPING CART - ROUTE MODULE (RFID + A*)
+// Su dung RFID lam diem xuat phat khi nhan "Tao lo trinh".
+// Giu nguyen tuyen mau, mo phong va nut ve cua vao.
+// ======================================================
+
+import { getCart } from "../cart/cart.js";
+import {
+    drawRoute,
+    clearRoute,
+    getEntrancePoint,
+    getShelfAccessPoint,
+    setCartPosition
+} from "../map/map.js";
+import { generateRouteApi } from "../api/routeApi.js";
+
+const SIM_SPEED = 8;
+const MAP_MAX_X = 80;
+const MAP_MAX_Y = 120;
+
+let activeRoute = null;
+let animationId = null;
+let simulateButton = null;
+let generatingRoute = false;
+
+// Toa do dung theo sa ban 80 cm (X) x 120 cm (Y).
+function valid(p) {
+    return p != null &&
+        p.x !== null && p.x !== undefined &&
+        p.y !== null && p.y !== undefined &&
+        Number.isFinite(Number(p.x)) &&
+        Number.isFinite(Number(p.y)) &&
+        Number(p.x) >= 0 && Number(p.x) <= MAP_MAX_X &&
+        Number(p.y) >= 0 && Number(p.y) <= MAP_MAX_Y;
+}
+
+// Luon lay diem bat dau tu Backend RFID, KHONG lay tu hieu ung
+// di chuyen tren map.js (co the dang noi suy toa do).
+async function getCurrentRFIDPosition() {
+    let response;
+    try {
+        response = await fetch("/api/rfid/position", {
+            cache: "no-store"
+        });
+    } catch (error) {
+        throw new Error("Khong ket noi duoc API vi tri RFID.");
+    }
+
+    if (!response.ok) {
+        throw new Error("API vi tri RFID tra ve HTTP " + response.status);
+    }
+
+    const data = await response.json();
+    if (!valid(data)) {
+        throw new Error("Backend RFID tra ve toa do khong hop le.");
+    }
+
+    // RouteController A* su dung luoi 1 cm (so nguyen).
+    const start = {
+        x: Math.round(Number(data.x)),
+        y: Math.round(Number(data.y))
+    };
+
+    console.log("[ROUTE] Diem bat dau RFID:", data.location, start);
+    return start;
+}
+
+function createRouteRequest(cart, start) {
+    return {
+        startPoint: { x: start.x, y: start.y },
+        products: cart.map(item => ({
+            productId: item.id,
+            name: item.name,
+            shelfId: item.shelfId,
+            xCoord: item.xCoord,
+            yCoord: item.yCoord,
+            qrCode: item.qrCode,
+            quantity: item.quantity
+        }))
+    };
+}
+
+function stopAnimation() {
+    if (animationId !== null) {
+        cancelAnimationFrame(animationId);
+    }
+    animationId = null;
+    if (simulateButton) {
+        simulateButton.disabled = !activeRoute;
+        simulateButton.textContent = "▶ Chạy thử xe";
+    }
+}
+
+// Ve tuyen chi dan nhung KHONG keo dau X (xe that) ve diem dau.
+function showRoute(points, expectedStart = null) {
+    stopAnimation();
+
+    const good = Array.isArray(points)
+        ? points.filter(valid).map(p => ({
+            x: Number(p.x),
+            y: Number(p.y)
+        }))
+        : [];
+
+    if (good.length < 2) {
+        activeRoute = null;
+        clearRoute();
+        alert("Lo trinh khong co du toa do hop le.");
+        return false;
+    }
+
+    if (expectedStart && (
+        Math.abs(good[0].x - expectedStart.x) > 1 ||
+        Math.abs(good[0].y - expectedStart.y) > 1
+    )) {
+        activeRoute = null;
+        clearRoute();
+        console.error("[ROUTE] Sai diem xuat phat:", {
+            expectedStart,
+            firstRoutePoint: good[0]
+        });
+        alert("Diem dau cua tuyen khong khop vi tri RFID. Kiem tra Backend.");
+        return false;
+    }
+
+    activeRoute = good;
+    drawRoute(good);
+    // KHONG setCartPosition(good[0]) o day:
+    // vi tri dau X duoc cap nhat boi RFID, khong phai duong A*.
+
+    if (simulateButton) {
+        simulateButton.disabled = false;
+    }
+    return true;
+}
+
+async function generateRoute() {
+    if (generatingRoute) return;
+
+    const cart = getCart();
+    if (!Array.isArray(cart) || cart.length === 0) {
+        alert("Gio hang dang rong. Hay them san pham truoc.");
+        return;
+    }
+
+    generatingRoute = true;
+    const button = document.getElementById("generateRouteButton");
+    if (button) button.disabled = true;
+
+    try {
+        // Moi lan tao tuyen, doc lai vi tri RFID that moi nhat.
+        const start = await getCurrentRFIDPosition();
+        const request = createRouteRequest(cart, start);
+        console.log("[ROUTE] Gui Backend:", request);
+
+        const result = await generateRouteApi(request);
+        console.log("[ROUTE] Backend tra ve:", result);
+
+        if (!result.success) {
+            alert(result.message || "Tao lo trinh that bai.");
+            return;
+        }
+        if (!result.data || !Array.isArray(result.data.routePoints)) {
+            alert("Backend khong tra ve routePoints hop le.");
+            return;
+        }
+
+        showRoute(result.data.routePoints, start);
+    } catch (error) {
+        console.error("[ROUTE] Loi tao lo trinh:", error);
+        alert(error.message || "Khong the tao lo trinh.");
+    } finally {
+        generatingRoute = false;
+        if (button) button.disabled = false;
+    }
+}
+
+// Chi dung de MO PHONG, khong phai toa do xe RFID thuc te.
+function simulateCart() {
+    if (!activeRoute || activeRoute.length < 2) {
+        alert("Hay tao lo trinh hoac chon tuyen mau truoc.");
+        return;
+    }
+
+    stopAnimation();
+    const lengths = [];
+    let total = 0;
+
+    for (let i = 1; i < activeRoute.length; i++) {
+        const a = activeRoute[i - 1];
+        const b = activeRoute[i];
+        const length = Math.hypot(b.x - a.x, b.y - a.y);
+        lengths.push(length);
+        total += length;
+    }
+
+    if (total <= 0) {
+        setCartPosition(activeRoute[activeRoute.length - 1]);
+        return;
+    }
+
+    const duration = total / SIM_SPEED * 1000;
+    let started = null;
+
+    if (simulateButton) {
+        simulateButton.disabled = true;
+        simulateButton.textContent = "⏳ Xe đang di chuyển";
+    }
+
+    setCartPosition(activeRoute[0]);
+
+    function frame(time) {
+        if (started === null) started = time;
+        let remaining = Math.min((time - started) / duration * total, total);
+        let point = activeRoute[activeRoute.length - 1];
+
+        for (let i = 0; i < lengths.length; i++) {
+            if (remaining <= lengths[i]) {
+                const a = activeRoute[i];
+                const b = activeRoute[i + 1];
+                const t = lengths[i] === 0 ? 1 : remaining / lengths[i];
+                point = {
+                    x: a.x + (b.x - a.x) * t,
+                    y: a.y + (b.y - a.y) * t
+                };
+                break;
+            }
+            remaining -= lengths[i];
+        }
+
+        setCartPosition(point);
+        if (time - started < duration) {
+            animationId = requestAnimationFrame(frame);
+        } else {
+            animationId = null;
+            setCartPosition(activeRoute[activeRoute.length - 1]);
+            if (simulateButton) {
+                simulateButton.disabled = false;
+                simulateButton.textContent = "▶ Chạy lại";
+            }
+        }
+    }
+
+    animationId = requestAnimationFrame(frame);
+}
+
+function demoRouteA3() {
+    const shelf = getShelfAccessPoint("A3");
+    if (!shelf) {
+        alert("Khong tim thay ke A3.");
+        return;
+    }
+
+    const demo = [
+        getEntrancePoint(),
+        { x: 13, y: 91 },
+        { x: 13, y: 68 },
+        shelf
+    ];
+
+    if (showRoute(demo)) simulateCart();
+}
+
+function resetCart() {
+    stopAnimation();
+    activeRoute = null;
+    clearRoute();
+    // Chi dat lai bieu tuong tren giao dien; KHONG doi du lieu RFID Backend.
+    setCartPosition(getEntrancePoint());
+    if (simulateButton) {
+        simulateButton.disabled = true;
+        simulateButton.textContent = "▶ Chạy thử xe";
+    }
+}
+
+function makeButton(label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.style.cssText = `
+        flex: 1 1 120px;
+        padding: 10px 8px;
+        background: #1565c0;
+        border: none;
+        border-radius: 7px;
+        color: white;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: bold;
+    `;
+    return button;
+}
+
+export function initRoute() {
+    const generateButton = document.getElementById("generateRouteButton");
+    if (!generateButton) {
+        console.error("Khong tim thay #generateRouteButton");
+        return;
+    }
+    if (document.getElementById("cartSimulationControls")) return;
+
+    generateButton.addEventListener("click", generateRoute);
+
+    const controls = document.createElement("div");
+    controls.id = "cartSimulationControls";
+    controls.style.cssText = `
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+    `;
+
+    const demoButton = makeButton("🧭 Tuyến mẫu A3");
+    simulateButton = makeButton("▶ Chạy thử xe");
+    simulateButton.disabled = true;
+    const resetButton = makeButton("↺ Về cửa vào");
+
+    demoButton.addEventListener("click", demoRouteA3);
+    simulateButton.addEventListener("click", simulateCart);
+    resetButton.addEventListener("click", resetCart);
+
+    controls.append(demoButton, simulateButton, resetButton);
+    generateButton.insertAdjacentElement("afterend", controls);
+
+    // KHONG dat xe ve cua vao o initRoute:
+    // RFID map.js se cap nhat vi tri xe that.
+}

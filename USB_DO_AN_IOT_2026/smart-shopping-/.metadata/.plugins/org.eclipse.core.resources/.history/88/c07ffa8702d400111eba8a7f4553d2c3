@@ -1,0 +1,88 @@
+// ======================================================
+// MAIN MODULE
+// Diem khoi dong cua Web UI
+// ======================================================
+
+import {
+    getAllProducts
+} from "./api/productApi.js";
+
+import {
+    drawSupermarketMap
+} from "./map/map.js";
+
+import {
+    initChat
+} from "./chat/chat.js";
+
+import {
+    renderCart
+} from "./cart/cart.js";
+
+import {
+    initRoute
+} from "./route/route.js";
+
+
+// ======================================================
+// LOAD DANH SACH SAN PHAM
+// ======================================================
+
+async function loadProducts() {
+
+    try {
+
+        const result =
+            await getAllProducts();
+
+        if (!result.success) {
+
+            console.error(
+                "Khong the lay danh sach san pham:",
+                result.message
+            );
+
+            return;
+        }
+
+        console.log(
+            "Danh sach san pham tu Backend:",
+            result.data
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Loi khi goi API /api/products:",
+            error
+        );
+    }
+}
+
+
+// ======================================================
+// KHOI DONG APP
+// ======================================================
+
+async function initApp() {
+
+    console.log(
+        "Khoi dong Smart Shopping Cart..."
+    );
+
+    drawSupermarketMap();
+
+    renderCart();
+
+    initChat();
+
+    initRoute();
+
+    await loadProducts();
+
+    console.log(
+        "Smart Shopping Cart da san sang."
+    );
+}
+
+initApp();

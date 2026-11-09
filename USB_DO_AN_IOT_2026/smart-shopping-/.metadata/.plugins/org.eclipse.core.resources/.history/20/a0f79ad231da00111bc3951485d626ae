@@ -1,0 +1,557 @@
+// ======================================================
+// ROUTE MODULE
+// Tao tuyen tu Backend va mo phong xe day
+// ======================================================
+
+import {
+    getCart
+} from "../cart/cart.js";
+
+import {
+    drawRoute,
+    clearRoute,
+    getEntrancePoint,
+    getShelfAccessPoint,
+    getCartPosition,
+    setCartPosition
+} from "../map/map.js";
+
+import {
+    generateRouteApi
+} from "../api/routeApi.js";
+
+// ======================================================
+// CAU HINH MO PHONG
+// ======================================================
+
+// Toc do mo phong
+// Don vi toa do logic / giay
+
+const SIM_SPEED = 8;
+
+let activeRoute = null;
+let animationId = null;
+let simulateButton = null;
+
+// ======================================================
+// TAO REQUEST GUI BACKEND
+// ======================================================
+
+function createRouteRequest(cart) {
+
+    const start = getCartPosition();
+
+    return {
+
+        startPoint: {
+            x: start.x,
+            y: start.y
+        },
+
+        products: cart.map(item => ({
+
+            productId: item.id,
+            name: item.name,
+            shelfId: item.shelfId,
+            xCoord: item.xCoord,
+            yCoord: item.yCoord,
+            qrCode: item.qrCode,
+            quantity: item.quantity
+
+        }))
+    };
+}
+
+// ======================================================
+// KIEM TRA TOA DO
+// ======================================================
+
+function valid(p) {
+
+    return p &&
+        Number.isFinite(Number(p.x)) &&
+        Number.isFinite(Number(p.y)) &&
+        Number(p.x) >= 0 &&
+        Number(p.x) <= 100 &&
+        Number(p.y) >= 0 &&
+        Number(p.y) <= 100;
+}
+
+// ======================================================
+// DUNG MO PHONG
+// ======================================================
+
+function stopAnimation() {
+
+    if (animationId !== null) {
+
+        cancelAnimationFrame(animationId);
+    }
+
+    animationId = null;
+
+    if (simulateButton) {
+
+        simulateButton.disabled = !activeRoute;
+
+        simulateButton.textContent =
+            "▶ Chạy thử xe";
+    }
+}
+
+// ======================================================
+// HIEN THI LO TRINH
+// ======================================================
+
+function showRoute(points) {
+
+    stopAnimation();
+
+    const good = Array.isArray(points)
+        ? points
+            .filter(valid)
+            .map(p => ({
+                x: Number(p.x),
+                y: Number(p.y)
+            }))
+        : [];
+
+    if (good.length < 2) {
+
+        activeRoute = null;
+
+        clearRoute();
+
+        alert(
+            "Lo trinh khong co du toa do hop le."
+        );
+
+        return false;
+    }
+
+    activeRoute = good;
+
+    drawRoute(good);
+
+    // Dua xe ve diem dau tuyen
+    setCartPosition(good[0]);
+
+    if (simulateButton) {
+        simulateButton.disabled = false;
+    }
+
+    return true;
+}
+
+// ======================================================
+// TAO LO TRINH TU BACKEND JAVA
+// ======================================================
+
+async function generateRoute() {
+
+    const cart = getCart();
+
+    if (!Array.isArray(cart) || cart.length === 0) {
+
+        alert(
+            "Gio hang dang rong. Hay them san pham truoc."
+        );
+
+        return;
+    }
+
+    try {
+
+        const request = createRouteRequest(cart);
+
+        console.log(
+            "[ROUTE] Gui Backend:",
+            request
+        );
+
+        const result = await generateRouteApi(
+            request
+        );
+
+        console.log(
+            "[ROUTE] Backend tra ve:",
+            result
+        );
+
+        if (!result.success) {
+
+            alert(
+                result.message ||
+                "Tao lo trinh that bai."
+            );
+
+            return;
+        }
+
+        if (
+            !result.data ||
+            !Array.isArray(result.data.routePoints)
+        ) {
+
+            alert(
+                "Backend khong tra ve routePoints hop le."
+            );
+
+            return;
+        }
+
+        showRoute(result.data.routePoints);
+
+    } catch (err) {
+
+        console.error(
+            "[ROUTE] Loi Backend:",
+            err
+        );
+
+        alert(
+            "Khong the tao lo trinh. Kiem tra Backend va Console."
+        );
+    }
+}
+
+// ======================================================
+// MO PHONG XE DI CHUYEN
+// ======================================================
+
+function simulateCart() {
+
+    if (!activeRoute || activeRoute.length < 2) {
+
+        alert(
+            "Hay tao lo trinh hoac chon tuyen mau truoc."
+        );
+
+        return;
+    }
+
+    stopAnimation();
+
+    const lengths = [];
+
+    let total = 0;
+
+    // Tinh do dai tung doan duong
+    for (let i = 1; i < activeRoute.length; i++) {
+
+        const a = activeRoute[i - 1];
+        const b = activeRoute[i];
+
+        const length = Math.hypot(
+            b.x - a.x,
+            b.y - a.y
+        );
+
+        lengths.push(length);
+
+        total += length;
+    }
+
+    if (total <= 0) {
+
+        setCartPosition(
+            activeRoute[activeRoute.length - 1]
+        );
+
+        return;
+    }
+
+    const duration =
+        total / SIM_SPEED * 1000;
+
+    let started = null;
+
+    if (simulateButton) {
+
+        simulateButton.disabled = true;
+
+        simulateButton.textContent =
+            "⏳ Xe đang di chuyển";
+    }
+
+    setCartPosition(activeRoute[0]);
+
+    // ==================================================
+    // CAP NHAT VI TRI XE THEO THOI GIAN
+    // ==================================================
+
+    function frame(time) {
+
+        if (started === null) {
+            started = time;
+        }
+
+        let remaining = Math.min(
+            (time - started) / duration * total,
+            total
+        );
+
+        let point =
+            activeRoute[activeRoute.length - 1];
+
+        for (let i = 0; i < lengths.length; i++) {
+
+            if (remaining <= lengths[i]) {
+
+                const a = activeRoute[i];
+                const b = activeRoute[i + 1];
+
+                const t = lengths[i] === 0
+                    ? 1
+                    : remaining / lengths[i];
+
+                point = {
+
+                    x: a.x + (b.x - a.x) * t,
+
+                    y: a.y + (b.y - a.y) * t
+
+                };
+
+                break;
+            }
+
+            remaining -= lengths[i];
+        }
+
+        // Cap nhat xe tren ban do
+        setCartPosition(point);
+
+        if (time - started < duration) {
+
+            animationId =
+                requestAnimationFrame(frame);
+
+        } else {
+
+            animationId = null;
+
+            setCartPosition(
+                activeRoute[activeRoute.length - 1]
+            );
+
+            if (simulateButton) {
+
+                simulateButton.disabled = false;
+
+                simulateButton.textContent =
+                    "▶ Chạy lại";
+            }
+        }
+    }
+
+    animationId = requestAnimationFrame(frame);
+}
+
+// ======================================================
+// TAO TUYEN MAU DEN KE A3
+// ======================================================
+
+function demoRouteA3() {
+
+    const shelf =
+        getShelfAccessPoint("A3");
+
+    if (!shelf) {
+
+        alert("Khong tim thay ke A3.");
+
+        return;
+    }
+
+    const demo = [
+
+        getEntrancePoint(),
+
+        { x: 13, y: 91 },
+
+        { x: 13, y: 68 },
+
+        shelf
+
+    ];
+
+    if (showRoute(demo)) {
+
+        simulateCart();
+    }
+}
+
+// ======================================================
+// DUA XE VE CUA VAO
+// ======================================================
+
+function resetCart() {
+
+    stopAnimation();
+
+    activeRoute = null;
+
+    clearRoute();
+
+    setCartPosition(
+        getEntrancePoint()
+    );
+
+    if (simulateButton) {
+
+        simulateButton.disabled = true;
+
+        simulateButton.textContent =
+            "▶ Chạy thử xe";
+    }
+}
+
+// ======================================================
+// TAO NUT DIEU KHIEN
+// ======================================================
+
+function makeButton(label) {
+
+    const button =
+        document.createElement("button");
+
+    button.type = "button";
+
+    button.textContent = label;
+
+    button.style.cssText = `
+        flex: 1 1 120px;
+        padding: 10px 8px;
+        background: #1565c0;
+        border: none;
+        border-radius: 7px;
+        color: white;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: bold;
+    `;
+
+    return button;
+}
+
+// ======================================================
+// KHOI TAO ROUTE
+// ======================================================
+
+export function initRoute() {
+
+    const generateButton =
+        document.getElementById(
+            "generateRouteButton"
+        );
+
+    if (!generateButton) {
+
+        console.error(
+            "Khong tim thay #generateRouteButton"
+        );
+
+        return;
+    }
+
+    // Khong tao trung nut
+
+    if (
+        document.getElementById(
+            "cartSimulationControls"
+        )
+    ) {
+
+        return;
+    }
+
+    // Nut tao lo trinh cu
+
+    generateButton.addEventListener(
+        "click",
+        generateRoute
+    );
+
+    // Tao khu dieu khien mo phong
+
+    const controls =
+        document.createElement("div");
+
+    controls.id =
+        "cartSimulationControls";
+
+    controls.style.cssText = `
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+    `;
+
+    // ==================================================
+    // NUT TUYEN MAU
+    // ==================================================
+
+    const demoButton =
+        makeButton("🧭 Tuyến mẫu A3");
+
+    // ==================================================
+    // NUT CHAY THU
+    // ==================================================
+
+    simulateButton =
+        makeButton("▶ Chạy thử xe");
+
+    simulateButton.disabled = true;
+
+    // ==================================================
+    // NUT RESET
+    // ==================================================
+
+    const resetButton =
+        makeButton("↺ Về cửa vào");
+
+    // ==================================================
+    // GAN SU KIEN
+    // ==================================================
+
+    demoButton.addEventListener(
+        "click",
+        demoRouteA3
+    );
+
+    simulateButton.addEventListener(
+        "click",
+        simulateCart
+    );
+
+    resetButton.addEventListener(
+        "click",
+        resetCart
+    );
+
+    // ==================================================
+    // THEM NUT VAO WEBSITE
+    // ==================================================
+
+    controls.append(
+        demoButton,
+        simulateButton,
+        resetButton
+    );
+
+    generateButton.insertAdjacentElement(
+        "afterend",
+        controls
+    );
+
+    // Dua xe ve cua vao khi khoi tao
+
+    setCartPosition(
+        getEntrancePoint()
+    );
+}
+
+// ======================================================
+// END ROUTE MODULE
+// ======================================================

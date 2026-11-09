@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Smart Shopping Cart</title>
+
+    <link
+        rel="stylesheet"
+        href="/css/style.css"
+    >
+</head>
+
+<body>
+
+    <!-- ==================================================
+         HEADER
+         ================================================== -->
+
+    <header class="app-header">
+
+        <h1>
+            Smart Shopping Cart
+        </h1>
+
+        <p>
+            He thong ho tro mua sam thong minh trong sieu thi
+        </p>
+
+    </header>
+
+
+    <!-- ==================================================
+         MAIN LAYOUT
+         ================================================== -->
+
+    <main class="main-layout">
+
+
+        <!-- ==================================================
+             BEN TRAI: CHATBOT
+             ================================================== -->
+
+        <section class="chat-panel">
+
+            <h2>
+                Tro ly mua sam
+            </h2>
+
+
+            <div
+                id="chatMessages"
+                class="chat-messages"
+            >
+
+                <p>
+                    Xin chao! Ban muon tim san pham
+                    hay goi y mon an?
+                </p>
+
+            </div>
+
+
+            <div class="chat-input-area">
+
+                <input
+                    type="text"
+                    id="chatInput"
+                    placeholder="Nhap yeu cau..."
+                >
+
+                <button id="sendButton">
+                    Gui
+                </button>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==================================================
+             GIUA: BAN DO SIEU THI
+             ================================================== -->
+
+        <section class="map-panel">
+
+            <h2>
+                Ban do sieu thi
+            </h2>
+
+
+            <div
+                id="supermarketMap"
+                class="supermarket-map"
+            >
+
+                <canvas id="mapCanvas" width="1400" height="1000"></canvas>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==================================================
+             BEN PHAI: GIO HANG
+             ================================================== -->
+
+        <section class="cart-panel">
+
+            <h2>
+                Gio hang
+            </h2>
+
+
+            <!-- Danh sach san pham trong gio -->
+
+            <div id="cartItems">
+
+                <p>
+                    Chua co san pham.
+                </p>
+
+            </div>
+
+
+            <!-- ==================================================
+                 NUT TAO LO TRINH
+                 ================================================== -->
+
+            <button
+                id="generateRouteButton"
+                class="route-button">
+
+                Tao lo trinh
+
+            </button>
+
+
+            <!-- ==================================================
+                 TONG TIEN
+                 ================================================== -->
+
+            <div class="cart-summary">
+
+                <strong>
+                    Tong tien:
+                </strong>
+
+                <span id="totalPrice">
+                    0 VND
+                </span>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- ==================================================
+         JAVASCRIPT MODULE
+         ================================================== -->
+
+    <script
+        type="module"
+        src="/js/main.js">
+    </script>
+
+</body>
+
+</html>

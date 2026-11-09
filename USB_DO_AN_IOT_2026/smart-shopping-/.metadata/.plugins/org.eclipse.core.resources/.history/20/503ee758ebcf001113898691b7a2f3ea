@@ -1,0 +1,114 @@
+package com.smartcart.service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+@Service
+public class GeminiService {
+
+    private static final String API_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + "gemini-2.5-flash:generateContent";
+
+    private final String apiKey;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    public GeminiService(
+            @Value("${gemini.api.key}") String apiKey,
+            ObjectMapper objectMapper) {
+
+        this.apiKey = apiKey;
+        this.objectMapper = objectMapper;
+
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
+    }
+
+    public String chat(String message) throws IOException, InterruptedException {
+
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Tin nhan khong duoc de trong."
+            );
+        }
+
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "Chua cau hinh GEMINI_API_KEY."
+            );
+        }
+
+        ObjectNode requestBody = objectMapper.createObjectNode();
+
+        ArrayNode contents = requestBody.putArray("contents");
+        ObjectNode content = contents.addObject();
+        ArrayNode parts = content.putArray("parts");
+
+        parts.addObject().put("text", message);
+
+        ObjectNode generationConfig =
+                requestBody.putObject("generationConfig");
+
+        generationConfig.put("temperature", 0.7);
+        generationConfig.put("maxOutputTokens", 1024);
+
+        String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .timeout(Duration.ofSeconds(60))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() < 200
+                || response.statusCode() >= 300) {
+
+            System.err.println(
+                    "Gemini API HTTP status: " + response.statusCode()
+            );
+
+            throw new IOException(
+                    "Gemini API loi HTTP "
+                    + response.statusCode()
+                    + ". Hay kiem tra API key, model va han muc su dung."
+            );
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+
+        JsonNode textNode = root.path("candidates")
+                .path(0)
+                .path("content")
+                .path("parts")
+                .path(0)
+                .path("text");
+
+        if (textNode.isMissingNode() || textNode.isNull()) {
+            throw new IOException(
+                    "Gemini khong tra ve noi dung hop le."
+            );
+        }
+
+        return textNode.asText();
+    }
+}

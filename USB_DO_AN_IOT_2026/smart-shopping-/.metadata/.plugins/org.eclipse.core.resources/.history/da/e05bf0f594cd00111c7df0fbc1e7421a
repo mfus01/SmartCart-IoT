@@ -1,0 +1,157 @@
+package com.smartcart.controller;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.smartcart.dto.ApiResponse;
+import com.smartcart.dto.RoutePoint;
+import com.smartcart.dto.RouteProductRequest;
+import com.smartcart.dto.RouteRequest;
+import com.smartcart.dto.RouteResponse;
+
+@RestController
+@RequestMapping("/api")
+public class RouteController {
+
+    // Vi tri loi di ngang tren ban do.
+    // Can doi chieu gia tri nay voi map.js.
+    private static final int AISLE_Y = 70;
+
+    @PostMapping("/generate-route")
+    public ApiResponse<RouteResponse> generateRoute(
+            @RequestBody RouteRequest request) {
+
+        // 1. Kiem tra request
+        if (request == null) {
+            return new ApiResponse<>(
+                    false,
+                    "Du lieu yeu cau khong hop le",
+                    null
+            );
+        }
+
+        // 2. Kiem tra diem bat dau
+        if (request.getStartPoint() == null) {
+            return new ApiResponse<>(
+                    false,
+                    "Thieu diem bat dau",
+                    null
+            );
+        }
+
+        // 3. Kiem tra danh sach san pham
+        if (request.getProducts() == null
+                || request.getProducts().isEmpty()) {
+            return new ApiResponse<>(
+                    false,
+                    "Danh sach san pham rong",
+                    null
+            );
+        }
+
+        RoutePoint start = request.getStartPoint();
+
+        List<RoutePoint> routePoints = new ArrayList<>();
+
+        // 4. Them diem xuat phat
+        addPoint(
+                routePoints,
+                start.getX(),
+                start.getY()
+        );
+
+        // 5. Di den loi di
+        addPoint(
+                routePoints,
+                start.getX(),
+                AISLE_Y
+        );
+
+        int currentX = start.getX();
+        int validProductCount = 0;
+
+        // 6. Di qua tung san pham trong gio hang
+        for (RouteProductRequest product : request.getProducts()) {
+
+            if (product == null) {
+                continue;
+            }
+
+            int productX = product.getXCoord();
+            int productY = product.getYCoord();
+
+            // Di ngang den cot san pham
+            addPoint(
+                    routePoints,
+                    currentX,
+                    AISLE_Y
+            );
+
+            addPoint(
+                    routePoints,
+                    productX,
+                    AISLE_Y
+            );
+
+            // Di den vi tri lay san pham
+            addPoint(
+                    routePoints,
+                    productX,
+                    productY
+            );
+
+            validProductCount++;
+
+            // Quay lai loi di de tiep tuc den san pham tiep theo
+            addPoint(
+                    routePoints,
+                    productX,
+                    AISLE_Y
+            );
+
+            currentX = productX;
+        }
+
+        // 7. Bao loi neu khong co san pham hop le
+        if (validProductCount == 0) {
+            return new ApiResponse<>(
+                    false,
+                    "Khong co san pham hop le de tao lo trinh",
+                    null
+            );
+        }
+
+        // 8. Ket thuc sau khi lay san pham cuoi cung.
+        // Khong tu dong dan den quay thanh toan.
+
+        RouteResponse response = new RouteResponse(routePoints);
+
+        return new ApiResponse<>(
+                true,
+                "Tao lo trinh lay hang thanh cong",
+                response
+        );
+    }
+
+    // Them diem vao lo trinh, bo qua diem trung lien tiep
+    private void addPoint(
+            List<RoutePoint> points,
+            int x,
+            int y) {
+
+        if (!points.isEmpty()) {
+            RoutePoint last = points.get(points.size() - 1);
+
+            if (last.getX() == x && last.getY() == y) {
+                return;
+            }
+        }
+
+        points.add(new RoutePoint(x, y));
+    }
+}
