@@ -1083,109 +1083,173 @@ function drawWallShelves() {
 
 
 // =====================================================
-
-// 14. VE 8 KE GIUA
-
+// SMART CART V6 - KE HAI MAT, PHAN 3 TANG (A1-A3 ... H1-H3)
+// Chi thay function drawCenterShelves() trong map.js hien tai.
+// KHONG thay toa do, data san pham, RFID, A*, animation.
 // =====================================================
-
-
-
 function drawCenterShelves() {
+    // Ve ke mot lan vao layer trong suot. Khi dau X chay,
+    // map.js chi ghep layer co san -> animation RFID van muot.
+    const cached = drawCenterShelves._visualCache;
+    if (cached && cached.width === canvas.width && cached.height === canvas.height) {
+        ctx.drawImage(cached, 0, 0);
+        return;
+    }
+
+    const shelfLayer = document.createElement("canvas");
+    shelfLayer.width = canvas.width;
+    shelfLayer.height = canvas.height;
+    const paint = shelfLayer.getContext("2d");
+    if (!paint) return;
+
+    // Ve 1 hinh chu nhat bo goc tren Canvas, khong can thu vien.
+    function roundedRectPath(x, y, w, h, r) {
+        const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+        paint.beginPath();
+        paint.moveTo(x + rr, y);
+        paint.lineTo(x + w - rr, y);
+        paint.quadraticCurveTo(x + w, y, x + w, y + rr);
+        paint.lineTo(x + w, y + h - rr);
+        paint.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+        paint.lineTo(x + rr, y + h);
+        paint.quadraticCurveTo(x, y + h, x, y + h - rr);
+        paint.lineTo(x, y + rr);
+        paint.quadraticCurveTo(x, y, x + rr, y);
+        paint.closePath();
+    }
 
     centerShelves.forEach((s, index) => {
+        const x = px(s.x);
+        const y = py(s.y);
+        const w = pw(s.width);
+        const h = ph(s.height);
+        const pad = 2.4;
+        const gutter = 4;
+        const faceWidth = (w - pad * 2 - gutter) / 2;
+        const leftX = x + pad;
+        const rightX = leftX + faceWidth + gutter;
 
-        drawBlock(
+        paint.save();
 
-            s,
+        // Khung ke hien dai, bong do rat nhe.
+        paint.shadowColor = "rgba(18, 48, 62, 0.18)";
+        paint.shadowBlur = 7;
+        paint.shadowOffsetY = 2;
+        roundedRectPath(x, y, w, h, 4);
+        paint.fillStyle = "#ffffff";
+        paint.fill();
+        paint.shadowColor = "transparent";
+        paint.shadowBlur = 0;
+        paint.shadowOffsetY = 0;
 
-            s.color,
+        // Hai mat ke doc lap, trung tam la khe phan cach nho.
+        roundedRectPath(leftX, y + pad, faceWidth, h - pad * 2, 2.4);
+        paint.fillStyle = s.color;
+        paint.fill();
 
-            "#445967"
+        roundedRectPath(rightX, y + pad, faceWidth, h - pad * 2, 2.4);
+        paint.fillStyle = s.color;
+        paint.fill();
+        paint.fillStyle = "rgba(255,255,255,0.26)";
+        paint.fill();
 
-        );
+		// =============================================
+		// VACH PHAN CHIA HAI MAT KE K1 - K8
+		// =============================================
 
+		// Nen khe phan cach
+		paint.fillStyle = "#e9f0f3";
+		paint.fillRect(
+		    leftX + faceWidth,
+		    y + pad,
+		    gutter,
+		    h - pad * 2
+		);
 
-
-        // Chia moi ke thanh 3 khu vuc san pham
-
+		// Duong chia doi dam hon
+		paint.fillStyle = "#526D7A";
+		paint.fillRect(
+		    x + w / 2 - 1.25,
+		    y + pad,
+		    2.5,
+		    h - pad * 2
+		);
+        // Ba tang san pham A1-A3 ... H1-H3.
         for (let part = 1; part <= 3; part++) {
-
             const sub = shelves[index * 3 + part - 1];
+            if (!sub) continue;
 
-
+            const sy = py(sub.y);
+            const sh = ph(sub.height);
+            const cy = sy + sh / 2;
 
             if (part > 1) {
-
-                ctx.beginPath();
-
-
-
-                ctx.moveTo(
-
-                    px(s.x),
-
-                    py(sub.y)
-
-                );
-
-
-
-                ctx.lineTo(
-
-                    px(s.x + s.width),
-
-                    py(sub.y)
-
-                );
-
-
-
-                ctx.strokeStyle = "rgba(38,50,56,.35)";
-
-                ctx.lineWidth = 2;
-
-                ctx.stroke();
-
+                paint.beginPath();
+                paint.moveTo(x + pad + 1, sy);
+                paint.lineTo(x + w - pad - 1, sy);
+                paint.strokeStyle = "rgba(48,74,88,0.33)";
+                paint.lineWidth = 1.5;
+                paint.stroke();
             }
 
+            // Hoa tiet ke hang tren hai mat, giup nhin nhu ke that.
+            paint.strokeStyle = "rgba(255,255,255,0.60)";
+            paint.lineWidth = 2;
+            [-23, 22].forEach(dy => {
+                const yy = cy + dy;
+                if (yy < sy + 8 || yy > sy + sh - 8) return;
+                paint.beginPath();
+                paint.moveTo(leftX + 4, yy);
+                paint.lineTo(leftX + faceWidth - 4, yy);
+                paint.moveTo(rightX + 4, yy);
+                paint.lineTo(rightX + faceWidth - 4, yy);
+                paint.stroke();
+            });
 
+            // Nhan san pham nam trong the trang nho: KHONG bi vach doc de len chu.
+            const badgeW = Math.min(30, w - 8);
+            const badgeH = 22;
+            const bx = x + (w - badgeW) / 2;
+            const by = cy - badgeH / 2;
+            roundedRectPath(bx, by, badgeW, badgeH, 5);
+            paint.fillStyle = "rgba(255,255,255,0.97)";
+            paint.fill();
+            paint.strokeStyle = "rgba(74,105,122,0.30)";
+            paint.lineWidth = 1;
+            paint.stroke();
 
-            textCenter(
-
-                sub.id,
-
-                sub.x + sub.width / 2,
-
-                sub.y + sub.height / 2,
-
-                16,
-
-                "#153943",
-
-                pw(sub.width) - 4
-
-            );
-
+            paint.fillStyle = "#263f4c";
+            paint.textAlign = "center";
+            paint.textBaseline = "middle";
+            paint.font = "bold 13px Arial, sans-serif";
+            paint.fillText(String(sub.id), x + w / 2, cy + 0.4, badgeW - 4);
         }
 
+        // Vien tong the tinh te; khong phu len nhan.
+        roundedRectPath(x + 0.5, y + 0.5, w - 1, h - 1, 4);
+        paint.strokeStyle = "#536d7b";
+        paint.lineWidth = 1.8;
+        paint.stroke();
 
+        // Ten ke K1-K8 tren mot tab trang rieng.
+        const tagW = 32;
+        const tagH = 19;
+        roundedRectPath(x + w / 2 - tagW / 2, y - 22, tagW, tagH, 5);
+        paint.fillStyle = "#f8fbfc";
+        paint.fill();
+        paint.strokeStyle = "#b7cbd4";
+        paint.lineWidth = 1;
+        paint.stroke();
+        paint.fillStyle = "#355363";
+        paint.font = "bold 14px Arial, sans-serif";
+        paint.textAlign = "center";
+        paint.textBaseline = "middle";
+        paint.fillText(s.id, x + w / 2, y - 12.5);
 
-        textCenter(
-
-            s.id,
-
-            s.x + s.width / 2,
-
-            s.y - 1.2,
-
-            16,
-
-            "#355161"
-
-        );
-
+        paint.restore();
     });
-
+    drawCenterShelves._visualCache = shelfLayer;
+    ctx.drawImage(shelfLayer, 0, 0);
 }
 
 
@@ -1436,52 +1500,54 @@ function findShelf(id) {
 
 
 
+// Ham dung chung cho ca tim kiem, gio hang va danh so lay hang.
+// LEFT/RIGHT la hai mat cua cung 1 ma A1..H3, khong doi ma ke trong DB.
+function normalizeShelfSide(side) {
+    return String(side || "RIGHT").trim().toUpperCase() === "LEFT"
+        ? "LEFT" : "RIGHT";
+}
+
+function getShelfFaceBounds(shelf, side) {
+    if (!shelf) return null;
+    if (shelf.id === "FOOD") {
+        return { x: shelf.x, y: shelf.y, width: shelf.width, height: shelf.height };
+    }
+    const half = shelf.width / 2;
+    return {
+        x: shelf.x + (normalizeShelfSide(side) === "RIGHT" ? half : 0),
+        y: shelf.y,
+        width: half,
+        height: shelf.height
+    };
+}
+
+function outlineShelfFace(shelf, side, color, line = 4) {
+    const box = getShelfFaceBounds(shelf, side);
+    if (box) border(box.x, box.y, box.width, box.height, color, line);
+}
+
 function productPoint(product) {
-
     const shelf = findShelf(product?.shelfId);
-
-
+    const side = normalizeShelfSide(product?.shelfSide);
 
     if (shelf) {
-
+        if (shelf.id === "FOOD") {
+            return { shelf, side: "RIGHT", x: shelf.accessX, y: shelf.accessY };
+        }
+        const zoneIndex = "ABCDEFGH".indexOf(shelf.zoneId);
+        const leftX = zoneIndex >= 0 ? [11, 25, 40, 54][zoneIndex % 4] : shelf.accessX;
         return {
-
             shelf,
-
-            x: shelf.accessX,
-
+            side,
+            x: side === "LEFT" ? leftX : shelf.accessX,
             y: shelf.accessY
-
         };
-
     }
 
-
-
-    const fallback = {
-
-        x: product?.xCoord,
-
-        y: product?.yCoord
-
-    };
-
-
-
+    const fallback = { x: product?.xCoord, y: product?.yCoord };
     return valid(fallback)
-
-        ? {
-
-            shelf: null,
-
-            x: Number(fallback.x),
-
-            y: Number(fallback.y)
-
-        }
-
+        ? { shelf: null, side, x: Number(fallback.x), y: Number(fallback.y) }
         : null;
-
 }
 
 
@@ -1513,23 +1579,7 @@ function drawProductHighlight(product) {
 
 
     if (loc.shelf) {
-
-        border(
-
-            loc.shelf.x,
-
-            loc.shelf.y,
-
-            loc.shelf.width,
-
-            loc.shelf.height,
-
-            "#fb8c00",
-
-            4
-
-        );
-
+        outlineShelfFace(loc.shelf, loc.side, "#fb8c00", 4);
     }
 
 
@@ -1771,73 +1821,34 @@ function drawRouteOverlay(points) {
 
 
 function getCartShelfGroups() {
-
     const groups = [];
-
     const byShelf = new Map();
 
-
-
     cartProductsOnMap.forEach(product => {
-
-        if (!product || !product.name) {
-
-            return;
-
-        }
-
-
-
+        if (!product || !product.name) return;
         const loc = productPoint(product);
-
-
-
         if (!loc) return;
 
-
-
+        // A1|LEFT va A1|RIGHT la 2 nhom khac nhau.
         const key = loc.shelf
-
-            ? loc.shelf.id
-
+            ? `${loc.shelf.id}|${loc.side}`
             : `${loc.x}:${loc.y}`;
 
-
-
         if (!byShelf.has(key)) {
-
             const group = {
-
                 index: groups.length + 1,
-
                 shelf: loc.shelf,
-
+                side: loc.side,
                 x: loc.x,
-
                 y: loc.y,
-
                 products: []
-
             };
-
-
-
             byShelf.set(key, group);
-
             groups.push(group);
-
         }
-
-
-
         byShelf.get(key).products.push(product);
-
     });
-
-
-
     return groups;
-
 }
 
 
@@ -1857,32 +1868,47 @@ function getCartShelfGroups() {
 function drawRoutePurchaseMarkers() {
     if (!Array.isArray(routePurchasePlan)) return false;
 
-    const grouped = new Map();
+    // Ve vien dung tung MAT KE cho TOAN BO mon trong lo trinh.
+    // Khong gop nham B2|LEFT va B2|RIGHT thanh 1 vi tri.
+    const faceGroups = new Map();
+    const pointGroups = new Map();
     for (const item of routePurchasePlan) {
         if (!valid(item)) continue;
+        const shelf = findShelf(item.shelfId);
+        const side = normalizeShelfSide(item.shelfSide);
+        if (shelf) {
+            const faceKey = `${shelf.id}|${shelf.id === "FOOD" ? "RIGHT" : side}`;
+            if (!faceGroups.has(faceKey)) {
+                faceGroups.set(faceKey, { shelf, side, items: [] });
+            }
+            faceGroups.get(faceKey).items.push(item);
+        }
+
         const x = Number(item.x);
         const y = Number(item.y);
-        const key = `${x.toFixed(2)}:${y.toFixed(2)}`;
-        if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key).push(item);
+        const pointKey = `${x.toFixed(2)}:${y.toFixed(2)}`;
+        if (!pointGroups.has(pointKey)) pointGroups.set(pointKey, []);
+        pointGroups.get(pointKey).push(item);
     }
 
+    for (const group of faceGroups.values()) {
+        const allDone = group.items.every(item => item.purchased);
+        outlineShelfFace(group.shelf, group.side,
+            allDone ? "#43a047" : "#ff9800", 3);
+    }
+
+    // Hai ke doi dien co the cung diem dung: chi 1 marker toa do,
+    // nhung van hien day du tung san pham o bang thu tu.
     const nextItem = routePurchasePlan.find(item => !item.purchased);
-    for (const items of grouped.values()) {
+    for (const items of pointGroups.values()) {
         const waiting = items.filter(item => !item.purchased);
         const chosen = (waiting.length ? waiting : items)[0];
         const allDone = waiting.length === 0;
         const isNext = Boolean(nextItem && items.includes(nextItem));
-        const shelf = findShelf(chosen.shelfId);
-
-        if (shelf) {
-            border(shelf.x, shelf.y, shelf.width, shelf.height,
-                allDone ? '#43a047' : '#ff9800', 3);
-        }
         marker(
             Number(chosen.x), Number(chosen.y),
-            allDone ? '#43a047' : (isNext ? '#ef6c00' : '#1565c0'),
-            allDone ? '✓' : String(chosen.order ?? '?'),
+            allDone ? "#43a047" : (isNext ? "#ef6c00" : "#1565c0"),
+            allDone ? "✓" : String(chosen.order ?? "?"),
             12
         );
     }
@@ -1890,49 +1916,14 @@ function drawRoutePurchaseMarkers() {
 }
 
 function drawCartMarkers() {
-
     if (drawRoutePurchaseMarkers()) return;
 
     getCartShelfGroups().forEach(group => {
-
         if (group.shelf) {
-
-            border(
-
-                group.shelf.x,
-
-                group.shelf.y,
-
-                group.shelf.width,
-
-                group.shelf.height,
-
-                "#ff9800",
-
-                4
-
-            );
-
+            outlineShelfFace(group.shelf, group.side, "#ff9800", 4);
         }
-
-
-
-        marker(
-
-            group.x,
-
-            group.y,
-
-            "#ef6c00",
-
-            group.index,
-
-            11
-
-        );
-
+        marker(group.x, group.y, "#ef6c00", group.index, 11);
     });
-
 }
 
 
@@ -2005,7 +1996,9 @@ function updateCartMapLegend() {
                 (item.purchased ? 'color:#2e7d32;text-decoration:line-through;' : 'color:#263238;');
             row.textContent = `${item.purchased ? '✓' : (item.order ?? '?') + '.'} ` +
                 `${item.name || 'San pham'} (x${item.quantity || 1})` +
-                ` - ${item.shelfId || 'Chua ro ke'}`;
+                ` - ${item.shelfId || 'Chua ro ke'}` +
+                (findShelf(item.shelfId)?.id === "FOOD" ? "" :
+                    ` (${normalizeShelfSide(item.shelfSide) === "LEFT" ? "MAT TRAI" : "MAT PHAI"})`);
             legend.appendChild(row);
         });
         return;
@@ -2085,9 +2078,13 @@ function updateCartMapLegend() {
 
 
 
+        const sideLabel = group.shelf && group.shelf.id !== "FOOD"
+            ? (group.side === "LEFT" ? " - MAT TRAI" : " - MAT PHAI")
+            : "";
+
         row.textContent =
 
-            `${group.index}. ${name}: ${products}`;
+            `${group.index}. ${name}${sideLabel}: ${products}`;
 
 
 
@@ -2325,24 +2322,20 @@ export function getMapShelves() {
 
 
 
-export function getShelfAccessPoint(id) {
-
-    const s = findShelf(id);
-
-
-
-    return s
-
-        ? {
-
-            x: s.accessX,
-
-            y: s.accessY
-
-        }
-
-        : null;
-
+export function getShelfAccessPoint(id, side = "RIGHT") {
+    const shelf = findShelf(id);
+    if (!shelf) return null;
+    if (shelf.id === "FOOD") {
+        return { x: shelf.accessX, y: shelf.accessY };
+    }
+    const zoneIndex = "ABCDEFGH".indexOf(shelf.zoneId);
+    const leftX = zoneIndex >= 0
+        ? [11, 25, 40, 54][zoneIndex % 4]
+        : shelf.accessX;
+    return {
+        x: normalizeShelfSide(side) === "LEFT" ? leftX : shelf.accessX,
+        y: shelf.accessY
+    };
 }
 
 

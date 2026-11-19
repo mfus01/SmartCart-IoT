@@ -21,6 +21,9 @@ public class Product {
     @NotBlank(message = "Ma ke hang khong duoc de trong")
     private String shelfId;
 
+    // Mat ke: LEFT (trai) / RIGHT (phai). Mac dinh RIGHT de tuong thich du lieu cu.
+    private String shelfSide = "RIGHT";
+
     @PositiveOrZero(message = "Toa do X khong duoc am")
     private int xCoord;
 
@@ -91,6 +94,14 @@ public class Product {
 
     public void setShelfId(String shelfId) {
         this.shelfId = shelfId;
+    }
+
+    public String getShelfSide() {
+        return shelfSide;
+    }
+
+    public void setShelfSide(String shelfSide) {
+        this.shelfSide = "LEFT".equalsIgnoreCase(shelfSide) ? "LEFT" : "RIGHT";
     }
 
     public int getXCoord() {

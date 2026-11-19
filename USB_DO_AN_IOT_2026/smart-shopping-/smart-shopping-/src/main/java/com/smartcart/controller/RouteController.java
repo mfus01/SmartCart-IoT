@@ -53,6 +53,9 @@ public class RouteController {
         25, 40, 54, 69
     };
 
+    // Diem tiep can ben trai cua K1..K4 / K5..K8 theo tung cot.
+    private static final int[] LEFT_ACCESS_X = {11, 25, 40, 54};
+
     private static final int[][] ACCESS_Y = {
         {22, 30, 38},
         {83, 91, 99}
@@ -284,6 +287,14 @@ public class RouteController {
             return null;
         }
 
+        // Tuong thich ma cu "A1" va ma moi "A1|LEFT", "A1|RIGHT".
+        // Chi la ma noi bo trong request: san pham trong SQLite van la A1..H3.
+        String normalized = id.trim().toUpperCase(Locale.ROOT);
+        String[] components = normalized.split("\\|", 2);
+        String side = components.length == 2 && "LEFT".equals(components[1])
+                ? "LEFT" : "RIGHT";
+        id = components[0];
+
         if (
             "FOOD".equals(id) ||
             "DELI".equals(id) ||
@@ -298,7 +309,7 @@ public class RouteController {
             int col = index % 4;
 
             return new RoutePoint(
-                ACCESS_X[col],
+                "LEFT".equals(side) ? LEFT_ACCESS_X[col] : ACCESS_X[col],
                 ACCESS_Y[row][1]
             );
         }
@@ -314,7 +325,7 @@ public class RouteController {
         int col = index % 4;
 
         return new RoutePoint(
-            ACCESS_X[col],
+            "LEFT".equals(side) ? LEFT_ACCESS_X[col] : ACCESS_X[col],
             ACCESS_Y[row][part]
         );
     }

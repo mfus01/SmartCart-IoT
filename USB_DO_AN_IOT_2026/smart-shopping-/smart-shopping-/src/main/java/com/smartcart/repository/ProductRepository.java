@@ -25,6 +25,22 @@ public class ProductRepository {
         this.databaseConnection = databaseConnection;
     }
 
+    // Mapping tap trung: moi API tim kiem deu tra ve shelfSide.
+    private Product mapProduct(ResultSet rs) throws SQLException {
+        Product product = new Product(
+                rs.getString("id"),
+                rs.getString("name"),
+                rs.getString("category"),
+                rs.getInt("price"),
+                rs.getString("shelf_id"),
+                rs.getInt("x_coord"),
+                rs.getInt("y_coord"),
+                rs.getString("qr_code")
+        );
+        product.setShelfSide(rs.getString("shelf_side"));
+        return product;
+    }
+
     // =========================================================
     // 1. LAY TOAN BO DANH SACH SAN PHAM
     // =========================================================
@@ -40,7 +56,8 @@ public class ProductRepository {
                        shelf_id,
                        x_coord,
                        y_coord,
-                       qr_code
+                       qr_code,
+                       shelf_side
                 FROM Products
                 ORDER BY id
                 """;
@@ -54,17 +71,7 @@ public class ProductRepository {
 
             while (resultSet.next()) {
 
-                Product product = new Product(
-                        resultSet.getString("id"),
-                        resultSet.getString("name"),
-                        resultSet.getString("category"),
-                        resultSet.getInt("price"),
-                        resultSet.getString("shelf_id"),
-                        resultSet.getInt("x_coord"),
-                        resultSet.getInt("y_coord"),
-                        resultSet.getString("qr_code")
-                );
-
+                Product product = mapProduct(resultSet);
                 products.add(product);
             }
 
@@ -98,7 +105,8 @@ public class ProductRepository {
                        shelf_id,
                        x_coord,
                        y_coord,
-                       qr_code
+                       qr_code,
+                       shelf_side
                 FROM Products
                 ORDER BY name
                 """;
@@ -118,17 +126,7 @@ public class ProductRepository {
 
                 if (normalizedProductName.contains(normalizedKeyword)) {
 
-                    Product product = new Product(
-                            resultSet.getString("id"),
-                            productName,
-                            resultSet.getString("category"),
-                            resultSet.getInt("price"),
-                            resultSet.getString("shelf_id"),
-                            resultSet.getInt("x_coord"),
-                            resultSet.getInt("y_coord"),
-                            resultSet.getString("qr_code")
-                    );
-
+                    Product product = mapProduct(resultSet);
                     matchedProducts.add(product);
                 }
             }
@@ -153,7 +151,8 @@ public class ProductRepository {
                        shelf_id,
                        x_coord,
                        y_coord,
-                       qr_code
+                       qr_code,
+                       shelf_side
                 FROM Products
                 WHERE id = ?
                 """;
@@ -169,16 +168,7 @@ public class ProductRepository {
 
                 if (resultSet.next()) {
 
-                    return new Product(
-                            resultSet.getString("id"),
-                            resultSet.getString("name"),
-                            resultSet.getString("category"),
-                            resultSet.getInt("price"),
-                            resultSet.getString("shelf_id"),
-                            resultSet.getInt("x_coord"),
-                            resultSet.getInt("y_coord"),
-                            resultSet.getString("qr_code")
-                    );
+                    return mapProduct(resultSet);
                 }
             }
 
@@ -202,7 +192,8 @@ public class ProductRepository {
                        shelf_id,
                        x_coord,
                        y_coord,
-                       qr_code
+                       qr_code,
+                       shelf_side
                 FROM Products
                 WHERE qr_code = ?
                 """;
@@ -218,16 +209,7 @@ public class ProductRepository {
 
                 if (resultSet.next()) {
 
-                    return new Product(
-                            resultSet.getString("id"),
-                            resultSet.getString("name"),
-                            resultSet.getString("category"),
-                            resultSet.getInt("price"),
-                            resultSet.getString("shelf_id"),
-                            resultSet.getInt("x_coord"),
-                            resultSet.getInt("y_coord"),
-                            resultSet.getString("qr_code")
-                    );
+                    return mapProduct(resultSet);
                 }
             }
 
@@ -253,9 +235,10 @@ public class ProductRepository {
                     shelf_id,
                     x_coord,
                     y_coord,
-                    qr_code
+                    qr_code,
+                    shelf_side
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (
@@ -271,6 +254,7 @@ public class ProductRepository {
             statement.setInt(6, product.getXCoord());
             statement.setInt(7, product.getYCoord());
             statement.setString(8, product.getQrCode());
+            statement.setString(9, product.getShelfSide());
 
             int rowsAffected = statement.executeUpdate();
 
@@ -294,7 +278,8 @@ public class ProductRepository {
                     shelf_id = ?,
                     x_coord = ?,
                     y_coord = ?,
-                    qr_code = ?
+                    qr_code = ?,
+                    shelf_side = ?
                 WHERE id = ?
                 """;
 
@@ -311,7 +296,8 @@ public class ProductRepository {
             statement.setInt(6, product.getYCoord());
             statement.setString(7, product.getQrCode());
 
-            statement.setString(8, product.getId());
+            statement.setString(8, product.getShelfSide());
+            statement.setString(9, product.getId());
 
             int rowsAffected = statement.executeUpdate();
 

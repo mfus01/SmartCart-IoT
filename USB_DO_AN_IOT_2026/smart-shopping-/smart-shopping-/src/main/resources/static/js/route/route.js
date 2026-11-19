@@ -55,6 +55,25 @@ function productKey(item) {
     return `${String(id)}::${String(item.shelfId || "").trim().toUpperCase()}`;
 }
 
+// Khong thay ma ke goc trong DB. Chi danh dau mat ke trong request A*.
+function normalizeShelfSide(side) {
+    return String(side || "RIGHT").trim().toUpperCase() === "LEFT"
+        ? "LEFT" : "RIGHT";
+}
+
+function routingShelfId(item) {
+    const id = String(item.shelfId || "").trim().toUpperCase();
+    // Chi 24 khu vuc A1-H3 (va K1-K8) duoc tach mat. FOOD giu nguyen.
+    return /^(?:[A-H][1-3]|K[1-8])$/.test(id)
+        ? `${id}|${normalizeShelfSide(item.shelfSide)}` : id;
+}
+
+function shelfSideDisplay(item) {
+    const id = String(item.shelfId || "").trim().toUpperCase();
+    if (!/^(?:[A-H][1-3]|K[1-8])$/.test(id)) return "";
+    return normalizeShelfSide(item.shelfSide) === "LEFT" ? "Mặt trái" : "Mặt phải";
+}
+
 function itemQuantity(item) {
     const n = Number(item.quantity);
     return Number.isFinite(n) && n > 0 ? n : 1;
@@ -104,8 +123,25 @@ function positionAlongRoute(point, routePoints) {
 }
 
 function getProductStop(item) {
-    const known = getShelfAccessPoint(item.shelfId);
-    if (valid(known)) return known;
+    const side = normalizeShelfSide(item.shelfSide);
+    const id = String(item.shelfId || "").trim().toUpperCase();
+    const known = getShelfAccessPoint(item.shelfId, side);
+    if (valid(known)) {
+        // Tuong thich ca ban map.js CHUA duoc sua chu ky nay.
+        // Vi tri LEFT khong duoc bat lay ben phai theo ma ke.
+        if (side === "LEFT") {
+            const normalized = /^[A-H]$/.test(id) ? `${id}1` : id;
+            const zone = /^[A-H][1-3]$/.test(normalized)
+                ? normalized.charCodeAt(0) - 65
+                : /^K[1-8]$/.test(normalized)
+                    ? Number(normalized.slice(1)) - 1 : -1;
+            if (zone >= 0) {
+                const leftX = [11, 25, 40, 54][zone % 4];
+                return { x: leftX, y: Number(known.y) };
+            }
+        }
+        return known;
+    }
     if (item.xCoord == null || item.yCoord == null) return null;
     const fallback = { x: Number(item.xCoord), y: Number(item.yCoord) };
     return valid(fallback) ? fallback : null;
@@ -120,6 +156,7 @@ function makePurchasePlan(pendingItems, routePoints) {
             id: item.id,
             name: String(item.name || "Sản phẩm"),
             shelfId: String(item.shelfId || ""),
+            shelfSide: normalizeShelfSide(item.shelfSide),
             quantity: itemQuantity(item),
             x: point ? Number(point.x) : null,
             y: point ? Number(point.y) : null,
@@ -165,7 +202,7 @@ function renderPurchasePanel() {
     summary.setAttribute("aria-live", "polite");
     summary.style.cssText = "font-weight:600;color:#21553b;margin-bottom:10px;line-height:1.5;";
     summary.textContent = next
-        ? `👉 Món tiếp theo: ${next.order}. ${next.name} — ${next.shelfId || "chưa rõ kệ"}`
+        ? `👉 Món tiếp theo: ${next.order}. ${next.name} — ${next.shelfId || "chưa rõ kệ"}${shelfSideDisplay(next) ? " (" + shelfSideDisplay(next) + ")" : ""}`
         : "🎉 Bạn đã xác nhận lấy đủ tất cả sản phẩm!";
     purchasePanel.appendChild(summary);
 
@@ -192,7 +229,7 @@ function renderPurchasePanel() {
         name.textContent = item.name;
         name.style.cssText = `font-weight:600;${item.purchased ? "text-decoration:line-through;color:#6b7280;" : "color:#1f2937;"}`;
         const detail = document.createElement("small");
-        detail.textContent = `Kệ ${item.shelfId || "?"} · Số lượng: ${item.quantity}` +
+        detail.textContent = `Kệ ${item.shelfId || "?"}${shelfSideDisplay(item) ? " · " + shelfSideDisplay(item) : ""} · Số lượng: ${item.quantity}` +
             (item.offRoute ? " · ⚠ cần kiểm tra tọa độ kệ" : "");
         detail.style.cssText = "display:block;color:#64748b;";
         info.append(name, detail);
@@ -313,7 +350,7 @@ function createRouteRequest(cart, start) {
         products: cart.map(item => ({
             productId: item.id,
             name: item.name,
-            shelfId: item.shelfId,
+            shelfId: routingShelfId(item),
             xCoord: item.xCoord,
             yCoord: item.yCoord,
             qrCode: item.qrCode,
@@ -392,7 +429,9 @@ async function generateRoute() {
             const point = getProductStop(item);
             return {
                 key: productKey(item), name: String(item.name || "Sản phẩm"),
-                shelfId: String(item.shelfId || ""), quantity: itemQuantity(item),
+                shelfId: String(item.shelfId || ""),
+                shelfSide: normalizeShelfSide(item.shelfSide),
+                quantity: itemQuantity(item),
                 x: point?.x ?? null, y: point?.y ?? null,
                 order: index + 1, purchased: true
             };
@@ -439,6 +478,7 @@ async function generateRoute() {
                     key: productKey(item), id: item.id,
                     name: String(item.name || "Sản phẩm"),
                     shelfId: String(item.shelfId || ""),
+                    shelfSide: normalizeShelfSide(item.shelfSide),
                     quantity: itemQuantity(item),
                     x: point?.x ?? null, y: point?.y ?? null,
                     order: null, purchased: true
@@ -528,26 +568,7 @@ function simulateCart() {
     animationId = requestAnimationFrame(frame);
 }
 
-function demoRouteA3() {
-    const shelf = getShelfAccessPoint("A3");
-    if (!shelf) {
-        alert("Khong tim thay ke A3.");
-        return;
-    }
 
-    const demo = [
-        getEntrancePoint(),
-        { x: 13, y: 91 },
-        { x: 13, y: 68 },
-        shelf
-    ];
-
-    activePurchasePlan = [];
-    planCartSignature = null;
-    renderPurchasePanel();
-    updatePurchasePlanMap();
-    if (showRoute(demo)) simulateCart();
-}
 
 function resetCart() {
     stopAnimation();
@@ -602,16 +623,16 @@ export function initRoute() {
         margin-top: 10px;
     `;
 
-    const demoButton = makeButton("🧭 Tuyến mẫu A3");
+   
     simulateButton = makeButton("▶ Chạy thử xe");
     simulateButton.disabled = true;
     const resetButton = makeButton("↺ Về cửa vào");
 
-    demoButton.addEventListener("click", demoRouteA3);
+    
     simulateButton.addEventListener("click", simulateCart);
     resetButton.addEventListener("click", resetCart);
 
-    controls.append(demoButton, simulateButton, resetButton);
+    controls.append(simulateButton, resetButton);
     generateButton.insertAdjacentElement("afterend", controls);
     installPurchasePanel(controls);
 

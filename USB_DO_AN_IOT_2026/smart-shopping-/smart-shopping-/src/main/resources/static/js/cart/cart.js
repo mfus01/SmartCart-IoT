@@ -318,6 +318,9 @@ export function addToCart(product) {
     if (existing) {
 
         existing.quantity += 1;
+        // Dong bo mat ke neu san pham duoc chon lai sau khi cap nhat API.
+        existing.shelfSide = String(product.shelfSide || existing.shelfSide || "RIGHT")
+            .trim().toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
 
     } else {
 
@@ -334,6 +337,10 @@ export function addToCart(product) {
             price: price,
 
             shelfId: product.shelfId,
+
+            // Can giu thong tin mat ke cho map.js va route.js (A*).
+            shelfSide: String(product.shelfSide || "RIGHT").trim().toUpperCase() === "LEFT"
+                ? "LEFT" : "RIGHT",
 
             xCoord: product.xCoord,
 
